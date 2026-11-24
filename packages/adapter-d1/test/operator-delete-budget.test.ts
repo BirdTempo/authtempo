@@ -406,9 +406,12 @@ const LOAD_SOLOS = 1;
  * of 2 on D1, and the recount. So the next one passes the budget. Since the
  * move onto main a plain membership costs no call. The organization rule
  * reads in 3 calls for up to 50 memberships (ruling 30 of plan 12d). Until
- * the move each membership cost 2 reads, and 3 fit.
+ * the move each membership cost 2 reads, and 3 fit. Plan 13c Task 1 reads
+ * the recount of all of them in one statement: each costs 2, and the
+ * recount 1 for all. The run of 2026-11-24 21:44 on the binding (load 2.7,
+ * 18 CPUs): 4 fit, and with no check 5 sent 51 calls, so 5 refuse.
  */
-const EDGE_OWNED = 3;
+const EDGE_OWNED = 4;
 
 /**
  * The solo organizations that the operator delete of the load takes for a
@@ -694,7 +697,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor, userId, ...REASON }),
     );
-    // The owned organization adds its owner lock and its recount, 3 calls.
+    // The owned organization adds its owner lock (2) and the one recount read (1), 3 calls.
     expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
     expect(r.refused).toBe(0);
     expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
@@ -1228,9 +1231,12 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * membership in 51 organizations of other users. The size check before
    * the act sends 6 reads: the memberships, and 5 of the organization rule.
    * The counts are the act with the route before it, and the sessions that
-   * the act ended.
+   * the act ended. Plan 13c Task 2: the self delete writes 51 leave rows in
+   * 1 insert statement. The act stays at 49, and the page ends 4 sessions in
+   * place of 5 (run of 2026-11-24 22:45:56 on the binding, load 5.8, 18
+   * CPUs).
    */
-  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 5 } };
+  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 4 } };
 
   it("deletes a user with 51 memberships in 50 calls: the size check counts each read that it sends (ruling 32 of plan 12n)", async () => {
     const sent: MailMessage[] = [];
@@ -1271,6 +1277,13 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
     expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
     for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    // One insert statement writes the 51 leave rows, with no IP and no user agent (plan 13c
+    // Task 2).
+    const leaves = `action = 'organization_member_remove' AND target_user_id = '${userId}'`;
+    expect(await rows("ta_operator_audit", leaves)).toBe(51);
+    expect(await rows("ta_operator_audit", `${leaves} AND ip IS NULL AND user_agent IS NULL`)).toBe(
+      51,
+    );
     expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.self);
   }, 300_000);
 

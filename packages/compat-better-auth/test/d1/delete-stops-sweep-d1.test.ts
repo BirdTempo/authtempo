@@ -29,6 +29,27 @@ await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
 const database = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });
 const APP = { kind: "app", name: "support-tool" } as const;
 
+/**
+ * The edge of a secret's delete with the impersonation tool on. The user
+ * has no solo organization. The edge counts the organizations that the user
+ * owns with another owner. The run of 2026-11-04 gave 3, as each cost 3
+ * queries. Plan 13c Task 1 reads one recount for all of them, so each costs
+ * 2. The run of 2026-11-24 22:07:31 on the binding (load 2.69, 18 CPUs):
+ * the tool on takes 5 and refuses 6; the tool off takes 6 and refuses 7.
+ */
+const SECRET_EDGE = 5;
+/** The queries of the refused delete, of the same delete with the tool off, and of the delete at the edge. */
+const SECRET_COUNTS = [14, 45, 45];
+
+/**
+ * The most organizations owned with another owner that the delete of an
+ * operator with impersonation sessions takes: 3 on 2026-11-04, and 5 after
+ * plan 13c Task 1 (the same run of 2026-11-24 22:07:31).
+ */
+const OPERATOR_EDGE = 5;
+/** The queries of the refused delete and of the delete at the edge. */
+const OPERATOR_COUNTS = [14, 47];
+
 /** A new storage over a counting view of `binding`: one invocation. */
 function invocation(binding: D1Database = env.DB) {
   const { db, count } = counting(binding);
@@ -344,14 +365,16 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
     expect(await pendingOf(database.storage, scene.userId)).toEqual([]);
   });
 
-  it("counts the read in the size check of a secret's delete: with the tool on, 4 organizations owned with another owner answer delete_too_large", {
+  it(`counts the read in the size check of a secret's delete: with the tool on, ${SECRET_EDGE + 1} organizations owned with another owner answer delete_too_large`, {
     timeout: 120_000,
   }, async () => {
     // Low 4 of the Task 2 review of plan 12o. A secret with the scope `delete`
     // deletes a user with no solo organization. Each organization that the
-    // user owns with another owner costs 3 queries. With the tool on, the read
-    // of the impersonation sessions costs 1 more, so 3 such organizations fit
-    // and 4 do not. With the tool off the read does not run, and 4 fit.
+    // user owns with another owner costs 2 queries (the owner lock), and one
+    // recount read serves all of them (plan 13c Task 1). With the tool on, the
+    // read of the impersonation sessions costs 1 more, so `SECRET_EDGE` such
+    // organizations fit and 1 more does not. With the tool off the read does
+    // not run, and 1 more fits.
     const a = await setupOf(database);
     const coOwner = await a.user("secret-co-owner@example.com");
     const SECRET = { kind: "secret", name: "erasure", scopes: ["users", "delete"] } as const;
@@ -396,19 +419,25 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
       });
       return { answer, queries: act.count.queries };
     };
-    const four = await userWith(4);
-    const refused = await deleteBy(four, true);
-    expect(refused.answer).toMatchObject({ ok: false, code: "delete_too_large" });
-    expect(await rowsOf(database.storage, four, "none")).toMatchObject({ user: true, members: 4 });
-    const toolOff = await deleteBy(four, false);
+    const over = await userWith(SECRET_EDGE + 1);
+    const refused = await deleteBy(over, true);
+    expect(refused.answer, `queries ${refused.queries}`).toMatchObject({
+      ok: false,
+      code: "delete_too_large",
+    });
+    expect(await rowsOf(database.storage, over, "none")).toMatchObject({
+      user: true,
+      members: SECRET_EDGE + 1,
+    });
+    const toolOff = await deleteBy(over, false);
     expect(toolOff.answer.ok, JSON.stringify(toolOff.answer)).toBe(true);
-    const three = await userWith(3);
-    const fits = await deleteBy(three, true);
+    const edge = await userWith(SECRET_EDGE);
+    const fits = await deleteBy(edge, true);
     expect(fits.answer.ok, JSON.stringify(fits.answer)).toBe(true);
     expect(fits.queries).toBeLessThanOrEqual(50);
-    // Run of 2026-11-04: the queries of the refused delete with the tool on and of the same
-    // delete with the tool off. Then the queries of the delete of 3 such organizations.
-    expect([refused.queries, toolOff.queries, fits.queries]).toEqual([14, 44, 45]);
+    // The queries of the refused delete with the tool on and of the same delete with the
+    // tool off. Then the queries of the delete of `SECRET_EDGE` such organizations.
+    expect([refused.queries, toolOff.queries, fits.queries]).toEqual(SECRET_COUNTS);
   });
 
   it("counts the read of the impersonation sessions in the size check of the delete", {
@@ -416,8 +445,10 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
   }, async () => {
     // An operator who impersonated a user and owns organizations with another
     // owner. The app actor deletes the operator. Each such organization costs
-    // 3 calls, and the read 1. So 4 organizations answer delete_too_large, and
-    // 3 fit in 50 queries.
+    // 2 calls, one recount read serves all of them (plan 13c Task 1), and the
+    // read of the impersonation sessions costs 1. So `OPERATOR_EDGE` + 1
+    // organizations answer delete_too_large, and `OPERATOR_EDGE` fit in 50
+    // queries.
     const a = await setupOf(database);
     const coOwner = await a.user("co-owner@example.com");
     const target = await a.user("impersonated@example.com");
@@ -446,18 +477,23 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
       }
       return op.id;
     };
-    const four = await operatorWith(4);
-    const refused = await deleteAt(four, new Date());
+    const over = await operatorWith(OPERATOR_EDGE + 1);
+    const refused = await deleteAt(over, new Date());
     expect(refused.answer, `queries ${refused.queries}`).toMatchObject({
       ok: false,
       code: "delete_too_large",
     });
-    expect(await rowsOf(database.storage, four, "none")).toMatchObject({ user: true, members: 5 });
-    const three = await operatorWith(3);
-    const deleted = await deleteAt(three, new Date());
+    // The operator holds 1 member row more than the owned organizations (the pin of
+    // 2026-11-04 held 5 member rows for 4 of them).
+    expect(await rowsOf(database.storage, over, "none")).toMatchObject({
+      user: true,
+      members: OPERATOR_EDGE + 2,
+    });
+    const edge = await operatorWith(OPERATOR_EDGE);
+    const deleted = await deleteAt(edge, new Date());
     expect(deleted.answer.ok, JSON.stringify(deleted.answer)).toBe(true);
     expect(deleted.queries).toBeLessThanOrEqual(50);
-    // Run of 2026-11-04: the queries of the refused delete and of the delete that fits.
-    expect([refused.queries, deleted.queries]).toEqual([14, 47]);
+    // The queries of the refused delete and of the delete that fits.
+    expect([refused.queries, deleted.queries]).toEqual(OPERATOR_COUNTS);
   });
 });

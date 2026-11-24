@@ -14,6 +14,7 @@ import {
 import {
   addMember,
   createOrganization,
+  ownerCounts,
   removeMember,
   updateMemberRole,
   updateOrganization,
@@ -36,7 +37,7 @@ import { enableTotp, setupTotp, verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { base32Decode } from "../src/primitives/totp.js";
-import type { UserRow } from "../src/schema.js";
+import type { Models, UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -105,8 +106,12 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
   return w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
 }
 
-/** The rows of `model` that name `userId`. */
-function childRows(w: World, model: (typeof USER_CHILD_MODELS)[number], userId: string) {
+/** The rows of `model` that name the user. A literal model gives its own row type. */
+function childRows<M extends (typeof USER_CHILD_MODELS)[number]>(
+  w: World,
+  model: M,
+  userId: string,
+): Promise<Models[M][]> {
   // Each model of the list has a `userId` field; the port's types cannot see that over a union.
   return w.auth.storage.findMany(model, [{ field: "userId", op: "eq", value: userId }] as never);
 }
@@ -1681,5 +1686,169 @@ describe("the delete's own order and rows (review L1 to L3)", () => {
     ).toMatchObject({ ok: false, code: "invalid_token" });
     expect((await sweepExpired(w.auth.config)).organizationRows).toBe(1);
     expect(await invitations()).toEqual([]);
+  });
+});
+
+describe("the one owner recount of an account delete (plan 13c Task 1)", () => {
+  /** The statements that `run` sends on the store of `w`. */
+  async function statementsOf<T>(w: World, run: () => Promise<T>): Promise<[T, number]> {
+    const sent = () => w.auth.storage.statementsSent?.() ?? Number.NaN;
+    const start = sent();
+    const value = await run();
+    return [value, sent() - start];
+  }
+
+  it("counts the owners of each organization in one statement (T1-1)", async () => {
+    const w = world();
+    const u = await verifiedSession(w.auth);
+    const a = await verifiedSession(w.auth, "a@example.com");
+    const b = await verifiedSession(w.auth, "b@example.com");
+    const c = await verifiedSession(w.auth, "c@example.com");
+    const o1 = await organization(w, u.user, "o1");
+    await member(w, u.user, o1.id, a.user.id, "owner");
+    const o2 = await organization(w, u.user, "o2");
+    await member(w, u.user, o2.id, b.user.id, "owner");
+    await member(w, u.user, o2.id, c.user.id, "member");
+    const o3 = await organization(w, u.user, "o3");
+    const [counts, statements] = await statementsOf(w, () =>
+      ownerCounts(w.auth.config, w.auth.storage, [o1.id, o2.id, o3.id]),
+    );
+    expect(Object.fromEntries(counts)).toEqual({ [o1.id]: 2, [o2.id]: 2, [o3.id]: 1 });
+    expect(statements).toBe(1);
+  });
+
+  it("answers an empty map for no organization and sends no statement (T1-2)", async () => {
+    const w = world();
+    const u = await verifiedSession(w.auth);
+    await organization(w, u.user, "o1");
+    const [counts, statements] = await statementsOf(w, () =>
+      ownerCounts(w.auth.config, w.auth.storage, []),
+    );
+    expect([...counts]).toEqual([]);
+    expect(statements).toBe(0);
+  });
+
+  /**
+   * The user u co-owns o1, o2, and o3 with b, on a D1-like view of the store.
+   * `inside` runs inside the delete's open transaction, after its owner locks
+   * and before its member delete, as the test of a removal on D1 above.
+   * With `capture`, `reads` gets each member read after the member delete:
+   * the organization of each row, and the `ownerCounts` of the same state.
+   */
+  async function coOwnerOfThree(
+    inside: (scene: {
+      d1: ReturnType<typeof d1Like>;
+      b: UserRow;
+      c: UserRow;
+      o2: string;
+    }) => Promise<unknown>,
+    capture = false,
+  ) {
+    const w = world();
+    const u = await verifiedSession(w.auth);
+    const b = await verifiedSession(w.auth, "b@example.com");
+    const c = await verifiedSession(w.auth, "c@example.com");
+    const orgs = [];
+    for (const slug of ["o1", "o2", "o3"]) {
+      const made = await organization(w, b.user, slug);
+      await member(w, b.user, made.id, u.user.id, "owner");
+      orgs.push(made);
+    }
+    const [o1, o2, o3] = orgs as [(typeof orgs)[0], (typeof orgs)[0], (typeof orgs)[0]];
+    await member(w, b.user, o2.id, c.user.id, "member");
+    const proof = await live(w, u.token);
+    const before = await userOf(w, u.user.id);
+    const d1 = d1Like(w.auth.config);
+    const raw = d1.storage;
+    const reads: { counts: Map<string, number>; rows: string[] }[] = [];
+    let ran = false;
+    let gone = false;
+    const view: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            delete: async (model, where) => {
+              const mine = model === "member" && where[0]?.field === "userId";
+              if (mine && !ran) {
+                ran = true;
+                await inside({ d1, b: b.user, c: c.user, o2: o2.id });
+              }
+              const n = await tx.delete(model, where);
+              if (mine) gone = true;
+              return n;
+            },
+            findMany: async (model, where, options) => {
+              const rows = await tx.findMany(model, where, options);
+              if (model === "member" && gone && capture)
+                reads.push({
+                  // The counts of the same state, read beside the delete's own read.
+                  counts: await ownerCounts(d1, raw, [o1.id, o2.id, o3.id]),
+                  rows: rows.map((r) => (r as { organizationId: string }).organizationId),
+                });
+              return rows;
+            },
+          }),
+        ),
+    };
+    const answer = await deleteAccount({ ...d1, storage: view }, input(proof));
+    return { w, u, b, c, o1, o2, o3, before, answer, reads };
+  }
+
+  /** The delete changed nothing of u: the user row, the 3 member rows, and the session stay. */
+  async function nothingOfU(s: Awaited<ReturnType<typeof coOwnerOfThree>>) {
+    expect(s.answer).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(await userOf(s.w, s.u.user.id)).toEqual(s.before);
+    const mine = await childRows(s.w, "member", s.u.user.id);
+    expect(mine.map((m) => [m.organizationId, m.role]).sort()).toEqual(
+      [
+        [s.o1.id, "owner"],
+        [s.o2.id, "owner"],
+        [s.o3.id, "owner"],
+      ].sort(),
+    );
+    expect(await resolveSession(s.w.auth.config, s.u.token)).not.toBeNull();
+    for (const o of [s.o1, s.o2, s.o3]) expect(await organizationOf(s.w, o.id)).not.toBeNull();
+  }
+
+  it("answers conflict when an owner removal passes the lock in one of 3 organizations (T1-3)", async () => {
+    const left: unknown[] = [];
+    const s = await coOwnerOfThree(async ({ d1, b, o2 }) => {
+      left.push(await removeMember(d1, { user: b, organizationId: o2, userId: b.id }));
+    });
+    expect(left).toEqual([{ ok: true, value: { ok: true } }]);
+    await nothingOfU(s);
+    // The removal of b committed: u is the one owner of o2 again.
+    expect((await membersOf(s.w, s.o2.id)).map((m) => [m.userId, m.role]).sort()).toEqual(
+      [
+        [s.u.user.id, "owner"],
+        [s.c.user.id, "member"],
+      ].sort(),
+    );
+  });
+
+  it("counts an organization with no member row left as 0 owners, and answers conflict (T1-4)", async () => {
+    // b removes c, then leaves, inside the delete's transaction. After the
+    // member delete of u, o2 has no member row. The recount read returns no
+    // row of o2, and the map holds o2 with 0.
+    const left: unknown[] = [];
+    const s = await coOwnerOfThree(async ({ d1, b, c, o2 }) => {
+      left.push(await removeMember(d1, { user: b, organizationId: o2, userId: c.id }));
+      left.push(await removeMember(d1, { user: b, organizationId: o2, userId: b.id }));
+    }, true);
+    expect(left).toEqual([
+      { ok: true, value: { ok: true } },
+      { ok: true, value: { ok: true } },
+    ]);
+    await nothingOfU(s);
+    expect(s.reads).toHaveLength(1);
+    const [read] = s.reads;
+    expect(read?.rows.sort()).toEqual([s.o1.id, s.o3.id].sort());
+    expect(Object.fromEntries(read?.counts ?? [])).toEqual({
+      [s.o1.id]: 1,
+      [s.o2.id]: 0,
+      [s.o3.id]: 1,
+    });
   });
 });

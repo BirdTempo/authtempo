@@ -63,10 +63,10 @@ The delete runs one transaction with its audit row. A refusal writes nothing and
 - Each actor gets 100 deletes an hour, on `operator-delete:actor:<kind>:<id>`. A refused call counts too. A delete cannot be undone, so the count bounds what a leaked secret destroys.
 - Each call also counts on `operator-users:ip:<ip>`, 600 an hour, with every command of the user tools.
 - On every store, a user who alone holds more than 50 organizations gets `delete_too_large` before any write.
-- On D1, one invocation sends at most 50 queries on Workers Free. Each organization that the user owns with another owner costs 3 queries, and a plain membership costs none.
-- On D1, a secret deletes a user with 1 solo organization and at most 3 organizations that the user owns with another owner.
+- On D1, one invocation sends at most 50 queries on Workers Free. Each organization that the user owns with another owner costs 2 queries, and 1 more query counts the owners of all of them. A plain membership costs none. The operator delete writes no organization audit row. The self delete (`POST /user/delete`) also writes one leave row in each organization that the user leaves. 1 more query writes all of them, plain memberships too.
+- On D1, a secret deletes a user with 1 solo organization and at most 4 organizations that the user owns with another owner.
 - On D1, a platform operator deletes a user with 1 solo organization and none of those, or with no solo organization and at most 2.
-- On the D1 storage of the compatibility package with the impersonation tool on, the delete reads the user's impersonation sessions in one more query. There a secret deletes a user with no solo organization and at most 3 organizations that the user owns with another owner. With the tool off, 4 such organizations fit.
+- On the D1 storage of the compatibility package with the impersonation tool on, the delete reads the user's impersonation sessions in one more query. There a secret deletes a user with no solo organization and at most 5 organizations that the user owns with another owner. With the tool off, 6 such organizations fit.
 - Postgres, MySQL, SQLite, and memory have no query limit per invocation. There only the count of solo organizations refuses.
 
 ## If it fails

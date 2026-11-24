@@ -79,7 +79,8 @@ describe("the operator delete on node:sqlite (ruling 5 of plan 12f2)", () => {
     if (!solo.ok) throw new Error(solo.code);
     const ids = [solo.value.organization.id];
     // On D1 a user actor fits 1 solo organization and no organization that the user owns
-    // with another owner (the move of 12f2 onto main, 2026-10-25). Here 3 pass.
+    // with another owner (the move of 12f2 onto main, 2026-10-25; measured again after
+    // the one recount read of plan 13c Task 1, 2026-11-24). Here 3 pass.
     const bob = await w.signIn("bob@example.com");
     for (let i = 0; i < 3; i++) {
       const made = await w.auth.api.createOrganization({

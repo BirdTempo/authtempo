@@ -166,9 +166,16 @@ describe("the account delete with no per-invocation query limit (ruling 10 of pl
    * the direct delete and the confirm of an owner of 1 solo organization
    * each take 2 shared organizations here, as with no parallel invocation.
    * Plan 13a (ruling R17) keeps the setup rows out of the act, so
-   * SOLO_CALLS stays 6 and both edges stay 2.
+   * SOLO_CALLS stays 6 and both edges stay 2. Plan 13c Task 1 reads one
+   * owner recount for all shared organizations, so each costs 1 call less
+   * after the first. The run of 2026-11-24 22:23 (load 10.7, 18 CPUs): both
+   * edges are 3 on this store. Plan 13c Task 2 adds 1 insert for the leave
+   * rows of all shared organizations. The run of 2026-11-24 22:53 (load
+   * 9.7, 18 CPUs): the confirm of 3 refuses, so its edge is 2. The direct
+   * delete keeps the edge 3, because the count of the direct delete had 1
+   * spare call on this store.
    */
-  const EDGE = { direct: 2, confirm: 2 } as const;
+  const EDGE = { direct: 3, confirm: 2 } as const;
   for (const scene of ["direct", "confirm"] as const)
     for (const shared of [EDGE[scene], EDGE[scene] + 1])
       it(`${shared > EDGE[scene] ? "refuses" : "deletes"} a co-owner of ${shared} organizations with a parallel invocation: ${scene}`, async () => {

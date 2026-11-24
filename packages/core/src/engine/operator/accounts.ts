@@ -416,7 +416,12 @@ async function lockUser(
  * secret fits 1 solo organization and 3 (measured 2026-10-25). Plan 13a
  * (ruling R19) puts the setup session and setup link deletes in the sweep
  * of the rest, so the act and these limits stay (measured on the D1
- * binding 2026-11-23, load averages 8.7 to 10.0 on 18 CPUs).
+ * binding 2026-11-23, load averages 8.7 to 10.0 on 18 CPUs). Plan 13c
+ * Task 1 reads the owner recount of all those organizations in one
+ * statement: each costs 2 (the owner lock), and the recount 1 for all. A
+ * secret now fits 1 solo organization and 4; a user actor still fits 1
+ * solo organization and none, or no solo organization and 2 (measured on
+ * the D1 binding 2026-11-24 21:44, load 2.7 on 18 CPUs).
  */
 export async function deleteUser(
   config: ResolvedConfig,
@@ -474,6 +479,8 @@ export async function deleteUser(
         budget: budget.value,
         refuseAfter: sized ? locked.value.calls : null,
         refusePlatform: input.actor.kind === "user",
+        // An operator act on a user writes no organization row (decision 4 of plan 13b).
+        leaveRows: false,
       });
       // The row is the last write of the act, so it can hold the ids.
       draft.data = { organizations: going.map((o) => o.id) };

@@ -78,7 +78,7 @@ Version 12 comes from the `0012_schema_v12` migration in both adapters, and from
 | `user.banReason` | `ta_user.ban_reason` | string, nullable | The operator's reason for the ban (plan 12f, spec 26 item 6). |
 | `user.banUntil` | `ta_user.ban_until` | date, nullable | The end of the ban. Null with `bannedAt` set: the ban has no end (plan 12f, spec 26 item 6). |
 | `session.actorId` | `ta_session.actor_id` | string, nullable | The platform operator who impersonates the user. Null on every other session (plan 12f, spec 26 item 9). |
-| `operatorAudit` | `ta_operator_audit` | table | One row per operator act: `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`, with an index on `target_user_id` and on `actor_id`. Core never updates or deletes a row. The account delete keeps the rows (plan 12f, spec 26 item 8). |
+| `operatorAudit` | `ta_operator_audit` | table | One row per operator act: `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`, with an index on `target_user_id` and on `actor_id`. Core never updates or deletes a row. The account delete keeps the rows (plan 12f, spec 26 item 8). A self account delete writes one `organization_member_remove` row in each organization that the user leaves, with no IP and no user agent (plan 13c). The platform organization gets no row. |
 
 Version 13 comes from the `0013_schema_v13` migration in both adapters, and from `0010_compat_schema_v13` in the compatibility package (plan 12k). Each new column is nullable, with no default and no fill. A row of version 12 holds null: no team, no scope, no window, no quota, and a live token.
 

@@ -69,7 +69,9 @@ The owner sees no detail of the platform. The operator act `sso_enforce_off` sho
   - Invitations: `organization_invitation_create`, `organization_invitation_accept`, and `organization_invitation_revoke`.
   - Tokens: `organization_token_create` and `organization_token_revoke`.
   - Roles: `organization_role_create`, `organization_role_update`, and `organization_role_delete`.
-- No row for these acts: a user deletes the account, a token update narrows a token, or an invitee declines an invitation. An account delete removes the member rows of the user and the invitations that the user sent, and writes no organization row.
+- A user who deletes the account leaves each organization that stays. The delete writes one `organization_member_remove` row in each of them, in the same transaction. The row holds the role, `self: true`, and `accountDelete: true` in `data`. It holds no IP and no user agent. Its actor is the `member` with the user id, and the email is null because the user is gone. An organization that goes with the account gets no row. The platform organization gets no row.
+- An operator delete of a user writes no organization row. Its row stays in the operator audit only.
+- No row for these acts: a token update narrows a token, or an invitee declines an invitation. An account delete also removes the invitations that the user sent, with no row.
 - The SSO acts: the connections, the domains, the SCIM tokens, the SCIM writes, the setup links, and the test runs.
 - No member row for a member that SCIM or a JIT sign-in adds. A SCIM write has its own `scim_user_create` row. A JIT sign-in has no audit row.
 - No operator act on a user, such as a ban or an impersonation. Those rows stay in the operator audit only.

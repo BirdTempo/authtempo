@@ -643,7 +643,8 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     const bob = await verifiedSession(w.auth, "bob@example.com");
     // The solo organizations go set-based in 6 calls for any count (ruling 30 of plan
     // 12d), so they do not grow the least work. Each shared organization that Ada owns
-    // with Bob costs its owner lock and its recount, 3 calls: 10 of them pass the budget.
+    // with Bob costs its owner lock, 2 calls, and one recount read serves all of them
+    // (plan 13c Task 1): 10 of them pass the budget.
     const ids = [(await soloOrganization(w, ada.user, "solo-0")).id];
     for (let i = 0; i < 10; i++)
       ids.push((await sharedOwned(w, bob.user, ada.user, `shared-${i}`)).id);
