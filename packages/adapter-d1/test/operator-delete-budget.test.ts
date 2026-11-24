@@ -1231,9 +1231,12 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * membership in 51 organizations of other users. The size check before
    * the act sends 6 reads: the memberships, and 5 of the organization rule.
    * The counts are the act with the route before it, and the sessions that
-   * the act ended.
+   * the act ended. Plan 13c Task 2: the self delete writes 51 leave rows in
+   * 1 insert statement. The act stays at 49, and the page ends 4 sessions in
+   * place of 5 (run of 2026-11-24 22:45:56 on the binding, load 5.8, 18
+   * CPUs).
    */
-  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 5 } };
+  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 4 } };
 
   it("deletes a user with 51 memberships in 50 calls: the size check counts each read that it sends (ruling 32 of plan 12n)", async () => {
     const sent: MailMessage[] = [];
@@ -1274,6 +1277,13 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
     expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
     for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    // One insert statement writes the 51 leave rows, with no IP and no user agent (plan 13c
+    // Task 2).
+    const leaves = `action = 'organization_member_remove' AND target_user_id = '${userId}'`;
+    expect(await rows("ta_operator_audit", leaves)).toBe(51);
+    expect(await rows("ta_operator_audit", `${leaves} AND ip IS NULL AND user_agent IS NULL`)).toBe(
+      51,
+    );
     expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.self);
   }, 300_000);
 

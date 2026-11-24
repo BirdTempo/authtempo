@@ -265,6 +265,36 @@ export async function writeAuditIn(
 }
 
 /**
+ * The statements of `writeAuditRowsIn` for `rows` rows: 0 for none, else one
+ * for each `rowsPerInsert` rows of the audit model. On D1 that is 1 for 1 to
+ * 1000 rows (`INSERT_ROWS_MAX`). The account delete counts it in its size
+ * check before the first write (plan 13c Task 2). It lives here, so the model
+ * name stays in this file (`NAMED_IN` of operator-audit-source.test.ts).
+ */
+export function auditInsertCalls(tx: StorageAdapter, rows: number): number {
+  return rows === 0 ? 0 : Math.ceil(rows / tx.rowsPerInsert("operatorAudit"));
+}
+
+/**
+ * The writer of many audit rows of one act, by the rule of `writeAuditIn`
+ * (plan 13c Task 2). One `createMany` sends the statements that
+ * `auditInsertCalls` counts, and an empty list sends none. The ids are
+ * monotonic ULIDs of `now` in the order of `drafts`.
+ */
+export async function writeAuditRowsIn(
+  tx: StorageAdapter,
+  drafts: readonly OperatorAuditDraft[],
+  now: Date,
+): Promise<void> {
+  if (drafts.length === 0) return;
+  // The draft first, so no field of it can replace the id or the times.
+  await tx.createMany(
+    "operatorAudit",
+    drafts.map((draft) => ({ ...draft, id: newMonotonicId(now), createdAt: now, updatedAt: now })),
+  );
+}
+
+/**
  * The fixed reason of each audit action of plan 12d (deviation 3). An owner
  * or a directory gives no reason, so the row holds this text. The text of
  * `sso_enforce_off` is never written: the operator gives the reason of that

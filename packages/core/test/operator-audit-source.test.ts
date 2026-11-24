@@ -38,21 +38,30 @@ describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () 
     // Any text of the name counts: a quote, a template literal, or a constant.
     const naming = files.filter((file) => text(file).includes("operatorAudit")).sort();
     expect(naming).toEqual(NAMED_IN);
-    // In the writer, each use of the name is the model argument of a create
-    // or a findMany. The pattern spans lines, so a split call still matches.
+    // In the writer, each use of the name is the model argument of a create,
+    // a createMany, or a findMany, or the one size read below. The pattern
+    // spans lines, so a split call still matches.
     const writer = text("engine/operator/audit.ts");
     const uses = writer.match(/operatorAudit/g)?.length ?? 0;
-    const allowed = writer.match(/\.(create|findMany)\(\s*"operatorAudit",/g)?.length ?? 0;
+    const allowed =
+      writer.match(/\.(create|createMany|findMany)\(\s*"operatorAudit",/g)?.length ?? 0;
     // The insert of writeAuditIn, the list, and the read of the impersonation
     // targets (plan 12f Task 11). The fourth is the read of a user's stop
     // rows, which the sweep calls for a cascading delete (ruling 19 of plan
     // 12o). The fifth is the read of one organization's rows (plan 13b
-    // Task 6). The writers operatorAct, the stop rows of
-    // ruling 43, and each act of plan 12d call writeAuditIn (plan 12d
-    // deviation 3). So the writer holds one insert.
-    expect(allowed).toBe(5);
-    expect(writer.match(/\.create\(\s*"operatorAudit",/g)?.length).toBe(1);
-    expect(uses).toBe(allowed);
+    // Task 6). The sixth is the insert of writeAuditRowsIn: the leave rows of
+    // a self account delete, one `createMany` for many organizations (plan
+    // 13c Task 2). The writers operatorAct, the stop rows of ruling 43, and
+    // each act of plan 12d call writeAuditIn (plan 12d deviation 3). So the
+    // writer holds two inserts, and both add rows. Neither changes a row.
+    expect(allowed).toBe(6);
+    expect(writer.match(/\.create(Many)?\(\s*"operatorAudit",/g)?.length).toBe(2);
+    // One more use is the size read of `auditInsertCalls`: the rows of one insert statement. It
+    // reads no row and writes none. The size check of the account delete needs it before the
+    // first write (plan 13c Task 2), and it is here so that no other file names the model.
+    const sizes = writer.match(/\.rowsPerInsert\(\s*"operatorAudit"\s*\)/g)?.length ?? 0;
+    expect(sizes).toBe(1);
+    expect(uses).toBe(allowed + sizes);
     // In ddl.ts, each use of the name is a key of MYSQL_STRINGS in the form
     // "operatorAudit.<field>". So a storage call there fails this test. Plan 13b adds the key of
     // organizationId, which the index on organizationId and id holds.

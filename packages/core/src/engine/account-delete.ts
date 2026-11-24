@@ -23,7 +23,14 @@ import {
   SESSIONS_PAGE_LEAST,
   STOPS_LIMIT,
 } from "./operator/access-end.js";
-import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
+import {
+  auditInsertCalls,
+  type ImpersonationStops,
+  impersonationStops,
+  type OperatorAuditDraft,
+  organizationAuditDraft,
+  writeAuditRowsIn,
+} from "./operator/audit.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET } from "./operator/sessions.js";
 import { deferOrganizationRest } from "./organization-rest.js";
@@ -159,6 +166,13 @@ const SCIM_GROUP_CALLS = 2;
  * takes 3 and the confirm 2; with none, the direct takes 6 and the confirm
  * 5. The next organization comes to 51 or 52 with no size check, so the
  * size check refuses it.
+ *
+ * Plan 13c Task 2 writes one leave row in each organization that the user
+ * leaves, with 1 insert statement for all of them (`auditInsertCalls`). A
+ * plain membership costs 1 insert too, shared with the others. The run of
+ * 2026-11-24 22:45:56 on the D1 binding (load 5.8, 18 CPUs): with 1 solo
+ * organization the direct self delete and the confirm each take 2; with
+ * none, each takes 5.
  */
 
 /**
@@ -445,7 +459,8 @@ async function runDelete(
   // work cannot fit the budget answers delete_too_large before any delete
   // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
   // user owns with another owner costs 2 calls, and 1 recount read serves
-  // all of them (plan 13c Task 1), so the check counts them.
+  // all of them (plan 13c Task 1). 1 insert writes the leave rows of all the
+  // organizations that the user leaves (plan 13c Task 2). The check counts them.
   const sized = config.storage.queryLimitPerInvocation === true;
   // The count of the user's sessions that the delete ended (plan 12h Task 5).
   const counted = { sessions: 0 };
@@ -493,6 +508,7 @@ async function runDelete(
         budget: OPERATOR_CALL_BUDGET,
         refuseAfter: sized ? before + calls : null,
         refusePlatform: false,
+        leaveRows: true,
       });
       return ok({ user, going });
     }),
@@ -589,7 +605,9 @@ export async function accountDeleted(
  *
  * The deletes come in this order. First the user row, the solo
  * organizations, the invitations the user sent, and the member rows of the
- * user. Then the sessions, and every other row of `USER_CHILD_MODELS`. The
+ * user. After the owner recount, the self delete writes the leave rows
+ * (`leaveRows`, plan 13c Task 2). Then the sessions, and every other row of
+ * `USER_CHILD_MODELS`. The
  * user row goes before the sessions: D1 has no lock, and a sign-in reads the
  * user row after its session insert. The sessions go before the
  * identities: a link in flight updates its session as its last statement,
@@ -649,6 +667,13 @@ export async function deleteAccountRows(
      * `operator_required` (`organizationsOfDelete`, ruling 5 of plan 12f2).
      */
     refusePlatform: boolean;
+    /**
+     * True for the self delete: each organization that the user leaves gets
+     * one `organization_member_remove` row (plan 13c Task 2, owner answer of
+     * 2026-11-24). False for the operator delete: an operator act on a user
+     * writes no organization row (decision 4 of plan 13b).
+     */
+    leaveRows: boolean;
   },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
@@ -668,7 +693,29 @@ export async function deleteAccountRows(
   const hold = await holdImpersonations(counted.storage, config, user.id, now, true);
   const plan = await organizationsOfDelete(config, counted.storage, user.id, proof.refusePlatform);
   if (!plan.ok) stopWith(plan.code);
-  const { going, owned } = plan.value;
+  const { going, owned, left } = plan.value;
+  // The leave rows of the organizations that keep other members (plan 13c
+  // Task 2). The actor and the target are the user, and `data` marks the
+  // account delete. The rows hold no IP and no user agent (owner answer of
+  // 2026-11-24): the person asked to erase the account, so the delete adds
+  // no personal data to the rows that stay. The platform organization is not
+  // in `left` (ruling R30).
+  const leaves: OperatorAuditDraft[] = [];
+  if (proof.leaveRows)
+    for (const { organization, role } of left) {
+      const draft = organizationAuditDraft({ kind: "user", user }, organization.id, {
+        action: "organization_member_remove",
+        targetUserId: user.id,
+        data: { role, self: true, accountDelete: true },
+        ip: null,
+        userAgent: null,
+      });
+      if (!draft.ok) stopWith(draft.code);
+      leaves.push(draft.value);
+    }
+  // One insert statement for each `rowsPerInsert` rows. D1 binds the rows as
+  // one JSON list: 1 statement for 1 to 1000 rows (`INSERT_ROWS_MAX`).
+  const leaveCalls = auditInsertCalls(tx, leaves.length);
   // D1 has no lock, so the read of the user's scimUser rows comes before the
   // size check there, and the delete knows its scimGroupMember chunks. Its
   // call left the reserve; each chunk past the first joins it. A user with
@@ -691,8 +738,8 @@ export async function deleteAccountRows(
   // batch of 2 on D1) of each organization that the user owns with another
   // owner, and 1 recount read for all of them (`listCalls`: 1 for up to
   // `LIST_MAX` ids, plan 13c Task 1). Then the user delete, the solo
-  // organizations, and the deletes of the invitations and the member rows of
-  // the user. Last the read of the impersonation sessions on a cascading
+  // organizations, the deletes of the invitations and the member rows of the
+  // user, and the insert of the leave rows (plan 13c Task 2). Last the read of the impersonation sessions on a cascading
   // store, the least of each page of sessions, and `keep`. The pending-end
   // row with stops takes the call of the last delete, so it needs no call
   // more. The size check comes before the scimUser locks, which D1 does not
@@ -703,6 +750,7 @@ export async function deleteAccountRows(
     1 +
     (going.length > 0 ? SOLO_CALLS : 0) +
     2 +
+    leaveCalls +
     (readsStops ? 1 : 0) +
     SESSIONS_PAGE_LEAST * (hold.targets.length > 0 ? 2 : 1) +
     keep;
@@ -788,6 +836,11 @@ export async function deleteAccountRows(
     );
     if (owned.some((x) => (owners.get(x.id) ?? 0) < 1)) stopWith("conflict");
   }
+  // After the recount, so a `conflict` spends no insert, and before the pages
+  // of the sessions, so the pages size off the budget that stays. In the
+  // transaction of the member delete: the rows commit with it, or neither
+  // commits.
+  await writeAuditRowsIn(tx, leaves, now);
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together (ruling 42 of plan 12f). The lock read of
   // `hold` came first. Each set ends in a page inside the call budget of the

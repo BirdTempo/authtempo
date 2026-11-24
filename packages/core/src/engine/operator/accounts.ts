@@ -479,6 +479,8 @@ export async function deleteUser(
         budget: budget.value,
         refuseAfter: sized ? locked.value.calls : null,
         refusePlatform: input.actor.kind === "user",
+        // An operator act on a user writes no organization row (decision 4 of plan 13b).
+        leaveRows: false,
       });
       // The row is the last write of the act, so it can hold the ids.
       draft.data = { organizations: going.map((o) => o.id) };
