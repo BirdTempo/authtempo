@@ -30,12 +30,12 @@ const database = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });
 const APP = { kind: "app", name: "support-tool" } as const;
 
 /**
- * The most organizations that a user with no solo organization owns with
- * another owner that the delete of a secret takes with the impersonation
- * tool on. The run of 2026-11-04 gave 3, as each cost 3 queries. Plan 13c
- * Task 1 reads one recount for all of them, so each costs 2. The run of
- * 2026-11-24 22:07 on the binding (load 2.6, 18 CPUs): the tool on takes 5
- * and refuses 6; the tool off takes 6 and refuses 7.
+ * The edge of a secret's delete with the impersonation tool on. The user
+ * has no solo organization. The edge counts the organizations that the user
+ * owns with another owner. The run of 2026-11-04 gave 3, as each cost 3
+ * queries. Plan 13c Task 1 reads one recount for all of them, so each costs
+ * 2. The run of 2026-11-24 22:07:31 on the binding (load 2.69, 18 CPUs):
+ * the tool on takes 5 and refuses 6; the tool off takes 6 and refuses 7.
  */
 const SECRET_EDGE = 5;
 /** The queries of the refused delete, of the same delete with the tool off, and of the delete at the edge. */
@@ -44,7 +44,7 @@ const SECRET_COUNTS = [14, 45, 45];
 /**
  * The most organizations owned with another owner that the delete of an
  * operator with impersonation sessions takes: 3 on 2026-11-04, and 5 after
- * plan 13c Task 1 (the same run of 2026-11-24 22:07).
+ * plan 13c Task 1 (the same run of 2026-11-24 22:07:31).
  */
 const OPERATOR_EDGE = 5;
 /** The queries of the refused delete and of the delete at the edge. */
