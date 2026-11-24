@@ -106,7 +106,6 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
   return w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
 }
 
-/** The rows of `model` that name `userId`. */
 /** The rows of `model` that name the user. A literal model gives its own row type. */
 function childRows<M extends (typeof USER_CHILD_MODELS)[number]>(
   w: World,
