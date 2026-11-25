@@ -6,10 +6,10 @@ import {
   type SqlStatements,
   type Statement,
 } from "@authtempo/core/sql";
-import type { Sql, TransactionSql } from "postgres";
+import type { PostgresClient, PostgresConnection, PostgresTransaction } from "./client.js";
 
 type Row = Record<string, unknown>;
-type Conn = Sql | TransactionSql;
+type Conn = PostgresConnection;
 
 /** What the adapter runs. `createPostgresAdapter` passes core's statements; plan 9's compatibility storage passes its own. */
 export interface PostgresAdapterOptions {
@@ -48,7 +48,7 @@ async function query(ctx: Ctx, s: Statement): Promise<{ rows: Row[]; count: numb
   const conn = ctx.conn;
   // The builder casts json parameters with `$n::text::jsonb`, so postgres.js
   // sends the serialized text unchanged and the server parses it.
-  const res = await conn.unsafe<Row[]>(s.sql, s.params as never[]);
+  const res = await conn.unsafe<Row>(s.sql, s.params as never[]);
   return { rows: res as unknown as Row[], count: res.count };
 }
 
@@ -144,11 +144,11 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await ctx.ready();
       if (ctx.inTransaction) {
         // A nested transaction is a savepoint on the same connection.
-        return savepoint(ctx.conn as TransactionSql, (sp) =>
+        return savepoint(ctx.conn as PostgresTransaction, (sp) =>
           fn(adapterOn({ ...ctx, conn: sp, inTransaction: true })),
         );
       }
-      return begin(ctx.conn as Sql, (tx) =>
+      return begin(ctx.conn as PostgresClient, (tx) =>
         fn(adapterOn({ ...ctx, conn: tx, inTransaction: true })),
       );
     },
@@ -178,17 +178,23 @@ function adapterOn(ctx: Ctx): StorageAdapter {
 }
 
 /** `begin` reserves one connection, runs fn, commits on resolve, rolls back and rethrows on throw. */
-async function begin<T>(sql: Sql, fn: (tx: TransactionSql) => Promise<T>): Promise<T> {
+async function begin<T>(
+  sql: PostgresClient,
+  fn: (tx: PostgresTransaction) => Promise<T>,
+): Promise<T> {
   return (await sql.begin(fn)) as T;
 }
 
 async function savepoint<T>(
-  tx: TransactionSql,
-  fn: (sp: TransactionSql) => Promise<T>,
+  tx: PostgresTransaction,
+  fn: (sp: PostgresTransaction) => Promise<T>,
 ): Promise<T> {
   return (await tx.savepoint(fn)) as T;
 }
 
-export function createPostgresAdapterOn(sql: Sql, options: PostgresAdapterOptions): StorageAdapter {
+export function createPostgresAdapterOn(
+  sql: PostgresClient,
+  options: PostgresAdapterOptions,
+): StorageAdapter {
   return adapterOn({ ...options, conn: sql, inTransaction: false, sent: { statements: 0 } });
 }

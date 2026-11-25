@@ -77,7 +77,7 @@ describe("check-dependencies", () => {
     const skipped = platform.length - installed.length;
     expect(platform.length).toBe(9);
     expect(summaryLine(r)).toBe(
-      `check-dependencies: PASS rows=113 runtime=37 peer=17 dev=50 platform=9 packages=53 closure=65 skipped=${skipped} exempt=1 builds=5 failures=0`,
+      `check-dependencies: PASS rows=114 runtime=37 peer=17 dev=51 platform=9 packages=53 closure=65 skipped=${skipped} exempt=1 builds=5 failures=0`,
     );
   });
 

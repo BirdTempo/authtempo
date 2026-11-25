@@ -18,6 +18,8 @@ export const PREFIXES = [
   "phone cap: ",
   // The driver tests of the SQLite adapter (plan 12g Task 4): the batch unit and the version floor.
   "sqlite driver: ",
+  // The driver major of a run of the Postgres adapter suite (3 or 4): the suite runs once on each.
+  "postgres driver: ",
 ];
 
 /**

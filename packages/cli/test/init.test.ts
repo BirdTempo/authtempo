@@ -19,6 +19,13 @@ import { assertFreshBuild, linesOf, PKG, REPO, runBin } from "./support/bin.js";
 const VERSION = (JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as { version: string })
   .version;
 const TEST_SECRET = "0123456789abcdef0123456789abcdef";
+/**
+ * The name of the env value that wrangler reads for the local connection
+ * string of the binding HYPERDRIVE. The workerd test of the Postgres stack
+ * sets it. It is a name, not a value, and it is longer than 32 characters.
+ * The scan lets this one text pass, so a real token of that shape still fails.
+ */
+const WRANGLER_ENV_NAME = "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE";
 let templates: Record<Stack, TemplateFile[]>;
 const PKG_JSON = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
   version: string;
@@ -79,7 +86,12 @@ function secretsIn(path: string, text: string): string[] {
   for (const m of text.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/"'`]+:[^\s@/"'`]+@([^\s/:"'`]+)/gi))
     if (m[1] !== "localhost" && m[1] !== "127.0.0.1") found.push(`${path}: a password for ${m[1]}`);
   for (const m of text.matchAll(/[A-Za-z0-9_-]{32,}/g))
-    if (m[0] !== TEST_SECRET && !/^[0-]+$/.test(m[0]) && !isSlug(m[0]))
+    if (
+      m[0] !== TEST_SECRET &&
+      m[0] !== WRANGLER_ENV_NAME &&
+      !/^[0-]+$/.test(m[0]) &&
+      !isSlug(m[0])
+    )
       found.push(`${path}: ${m[0].slice(0, 8)}… looks like a token`);
   return found;
 }

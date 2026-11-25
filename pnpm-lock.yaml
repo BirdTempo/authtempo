@@ -922,8 +922,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/observe
       postgres:
-        specifier: 3.4.9
-        version: 3.4.9
+        specifier: 4.1.1
+        version: 4.1.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
@@ -997,6 +997,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      postgres-4:
+        specifier: npm:postgres@4.1.1
+        version: postgres@4.1.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -1224,6 +1227,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      postgres-4:
+        specifier: npm:postgres@4.1.1
+        version: postgres@4.1.1
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -7581,6 +7587,10 @@ packages:
   postgres@3.4.9:
     resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
     engines: {node: '>=12'}
+
+  postgres@4.1.1:
+    resolution: {integrity: sha512-1kJDojqNZC+iTHHXh6eif0J98LUtyLAePe/qkW1GK35eh2JixlsAiIKq3FGI+xqI+SUGTNodzf7TScVeIIyUug==}
+    engines: {node: '>=18'}
 
   powershell-utils@0.2.1:
     resolution: {integrity: sha512-C+y9x90UElAddDZmV4qOx9W53B61PO7cIqWz2dQsWlwswuq4mr8NEwytdGKboYbQlGZ3awrkTeNvcZiZNHnQ8A==}
@@ -15757,6 +15767,8 @@ snapshots:
   postgres@3.4.7: {}
 
   postgres@3.4.9: {}
+
+  postgres@4.1.1: {}
 
   powershell-utils@0.2.1: {}
 

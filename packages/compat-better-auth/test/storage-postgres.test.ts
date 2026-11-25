@@ -14,7 +14,7 @@ import {
 } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
 import { columnName, columnsOf, TABLES, uniqueIndexName } from "@authtempo/core/sql";
-import postgres, { type Sql } from "postgres";
+import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
@@ -27,7 +27,7 @@ import {
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
-import { freshBetterAuthSchema, migrateWithoutLock, PG_URL } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock, PG_URL, postgres } from "./pg.js";
 
 /** Core's unique indexes and indexes of one model, with core's names and column order. */
 function expectedIndexes(model: ModelName) {

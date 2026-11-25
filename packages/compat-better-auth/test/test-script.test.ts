@@ -15,6 +15,13 @@ describe("the test script of the package (plan 12n)", () => {
     expect(steps).toContain("bun --bun vitest run -c vitest.bun.config.ts");
   });
 
+  // The peer range of postgres is `^3.4.9 || ^4.1.1`. The first step runs on
+  // 3.4.9. Without the env value this step also runs on 3.4.9, and without
+  // the step no test runs on 4.1.1.
+  it("runs the Postgres tests on postgres 4.1.1 too", () => {
+    expect(steps).toContain("TEMPO_AUTH_PG_DRIVER=4 vitest run -c vitest.pg4.config.ts");
+  });
+
   it("runs each vitest config at the package root", () => {
     const configs = readdirSync(root).filter((f) => /^vitest(\.[\w-]+)?\.config\.ts$/.test(f));
     expect(configs).toEqual(

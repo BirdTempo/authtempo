@@ -78,7 +78,7 @@ DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" pnpm --filter my-app 
 Warning: with one connection for each request, a before hook that queries the same client stops the request. The request never ends. Read [The one-connection rule](/docs/concepts/one-connection/) before you add a hook.
 :::
 
-The test runs the code of the Worker on Node against the local Postgres. The repo has no run of this adapter on workerd through Hyperdrive yet, so do one real sign-in after the first deploy.
+Two test files run the code of the Worker on Node against the local Postgres. The file `test/workerd.test.ts` runs the Worker in workerd, and the local form of the Hyperdrive binding connects it to that Postgres. No test runs the Hyperdrive service, so do one real sign-in after the first deploy.
 
 ## Next
 

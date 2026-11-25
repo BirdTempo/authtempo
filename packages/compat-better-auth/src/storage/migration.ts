@@ -1,3 +1,4 @@
+import type { PostgresClient } from "@authtempo/adapter-postgres";
 import { SQLITE_MIGRATIONS_TABLE_SQL, type SqliteDriver } from "@authtempo/adapter-sqlite";
 import { StorageError } from "@authtempo/core";
 import {
@@ -6,7 +7,6 @@ import {
   SCHEMA_VERSION_KEY,
   schemaVersionGate,
 } from "@authtempo/core/sql";
-import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
 import { type BaseTable, BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
 import { placeholderSql } from "./placeholder.js";
@@ -1708,17 +1708,18 @@ const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migration
  * once run each migration once. The applied version is the
  * `compat_better_auth` row of ta_meta: no third table.
  */
-export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): Promise<string[]> {
+export async function applyBetterAuthCompatMigrations(
+  sql: PostgresClient,
+  names: Names,
+): Promise<string[]> {
   const applied: string[] = [];
   for (const m of compatPostgresSteps(names)) {
     const ran = await sql.begin(async (tx) => {
       await tx.unsafe(LOCK);
-      const reg = await tx.unsafe<{ t: string | null }[]>(
-        "SELECT to_regclass('ta_meta')::text AS t",
-      );
+      const reg = await tx.unsafe<{ t: string | null }>("SELECT to_regclass('ta_meta')::text AS t");
       let current = 0;
       if (reg[0]?.t) {
-        const rows = await tx.unsafe<{ value: string }[]>(
+        const rows = await tx.unsafe<{ value: string }>(
           `SELECT value FROM ${META_TABLE} WHERE key = $1`,
           [COMPAT_META_KEY],
         );
@@ -1777,9 +1778,9 @@ export function compatVersionCheck(
 }
 
 /** One read of a meta row on Postgres. Only an undefined table (42P01) reads as "no version"; any other error passes through. */
-async function postgresMetaValue(sql: Sql, key: string): Promise<string | null> {
+async function postgresMetaValue(sql: PostgresClient, key: string): Promise<string | null> {
   try {
-    const rows = await sql.unsafe<{ value: string }[]>(
+    const rows = await sql.unsafe<{ value: string }>(
       `SELECT value FROM ${META_TABLE} WHERE key = $1`,
       [key],
     );
@@ -1791,7 +1792,7 @@ async function postgresMetaValue(sql: Sql, key: string): Promise<string | null> 
 }
 
 /** The ready check on Postgres: core's version, then the mapping version. */
-export function postgresCompatReady(sql: Sql): () => Promise<void> {
+export function postgresCompatReady(sql: PostgresClient): () => Promise<void> {
   return compatVersionGate(
     () => postgresMetaValue(sql, SCHEMA_VERSION_KEY),
     () => postgresMetaValue(sql, COMPAT_META_KEY),
@@ -1799,7 +1800,7 @@ export function postgresCompatReady(sql: Sql): () => Promise<void> {
 }
 
 /** The `ping` on Postgres (plan 12h Task 8): the same reads with no cache. */
-export function postgresCompatPing(sql: Sql): () => Promise<void> {
+export function postgresCompatPing(sql: PostgresClient): () => Promise<void> {
   return compatVersionCheck(
     () => postgresMetaValue(sql, SCHEMA_VERSION_KEY),
     () => postgresMetaValue(sql, COMPAT_META_KEY),

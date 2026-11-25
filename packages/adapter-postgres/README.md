@@ -1,6 +1,6 @@
 # @authtempo/adapter-postgres
 
-The storage adapter for Postgres through postgres.js (`postgres` 3.4.9 or newer, a peer dependency).
+The storage adapter for Postgres through postgres.js (`postgres`, a peer dependency). The range is `^3.4.9 || ^4.1.1`. [The driver versions](#the-driver-versions) gives the reason for each bound.
 
 ```ts
 import { createAuth } from "@authtempo/core";
@@ -40,13 +40,41 @@ transaction's connection. The engine itself never does this. Since plan 9d
 (amended 2026-10-13 by the plan 9d final fix wave), a before hook runs the
 app's code inside the engine's open transaction, so the app's hook decides:
 a before hook that queries this client with `max: 1` hangs the request until
-the client ends: postgres.js 3.4.9 has no default queue timeout. If your own code does this, in a hook or elsewhere, use
+the client ends: postgres.js has no default queue timeout, in 3.4.9 and in 4.1.1. If your own code does this, in a hook or elsewhere, use
 `max: 2` or more, or a second client.
 `test/hook-one-connection.test.ts` pins the hang with a pool of one and
 the pass with a pool of two (plan 9h).
 
-The adapter has not yet run on workerd through Hyperdrive in this repo.
-Its first Workers consumer proves that run.
+examples/worker-postgres runs in workerd on postgres 4.1.1 in
+`test/workerd.test.ts`. The local form of the Hyperdrive binding connects
+workerd to the test Postgres, with no pooler. The adapter has not yet run
+through the Hyperdrive service in this repo, and postgres 3.4.9 has not yet
+run in workerd here. Do one real sign-in after the first deploy.
+
+## The driver versions
+
+The peer range is `^3.4.9 || ^4.1.1`. The test script runs the full suite
+two times: on 3.4.9, then on 4.1.1. `test/driver.test.ts` proves which
+driver a run has.
+
+- **3.4.9 and later of major 3.** The adapter had this range first.
+- **4.1.1 and later of major 4.** 4.0.0 and 4.1.0 are outside the range, for
+  three faults that the release notes of postgres.js state (read 2026-11-25).
+  4.0.0 keeps the rows of each prepared statement in memory. 4.1.0 sends a
+  query through Hyperdrive that never answers, after a query with an untyped
+  string or boolean. Before 4.1.1 a statement that `sql.begin` sends after its
+  own `ROLLBACK` runs outside the transaction, and its write stays.
+
+The `Sql` types of the two majors do not fit each other. So each function
+of this package takes a `PostgresClient`, a type of this package that names
+only the calls it makes: `unsafe`, `begin`, and `savepoint`. The client of
+each major fits it. The typecheck of the repo proves both: the CLI passes a
+client of 3.4.9, and examples/worker-postgres passes a client of 4.1.1.
+
+Major 4 changes how the driver types a parameter, and it removes
+`sql.array()`. The suite passes on both versions, also in a time zone that
+is not UTC. Read the upgrade guide of postgres.js for your own queries on the
+same client.
 
 ## Migrations
 
