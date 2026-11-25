@@ -22,6 +22,7 @@ import { PARAM_SEGMENT_RE } from "./route-key.js";
 import {
   BODY_CODE,
   BUSY_CODE,
+  CLIENT_IP_CODE,
   HOST_CODE,
   type RouteKey,
   type RouterCode,
@@ -145,7 +146,13 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
 
 /** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
 function routerError(
-  code: RouterCode | typeof HOST_CODE | typeof BODY_CODE | typeof BUSY_CODE | typeof TIMEOUT_CODE,
+  code:
+    | RouterCode
+    | typeof HOST_CODE
+    | typeof CLIENT_IP_CODE
+    | typeof BODY_CODE
+    | typeof BUSY_CODE
+    | typeof TIMEOUT_CODE,
 ): Response {
   return json({ error: code }, ERRORS[code]);
 }
@@ -426,9 +433,13 @@ export function createRouter(
     const traceId = parent?.traceId ?? minted.traceId;
     // The handler's own call reads the IP again inside the error boundary, so a throw there answers 500.
     let ip: string | null = null;
+    // False after a throw of `clientIp`: that request keeps its 500, and it is not "no client IP".
+    let ipRead = true;
     try {
       ip = config.clientIp(request);
-    } catch {}
+    } catch {
+      ipRead = false;
+    }
     // The entry of the request's host (plan 12i Task 18). A host outside the list runs no handler.
     const host = hostConfig(config, url);
     const scoped: ResolvedConfig = {
@@ -455,10 +466,16 @@ export function createRouter(
       });
       options?.waitUntil?.(kept);
     };
+    // `limits.noClientIp: "refuse"`: no route runs for a request with no client
+    // IP, so no limit counts it on the shared key and no large read takes the
+    // share of the client `unknown`. An OPTIONS request gets the same answer.
+    const noClientIp = ipRead && ip === null && config.limits.noClientIp === "refuse";
     const res =
       host === null
         ? withTrace(routerError(HOST_CODE), traceId)
-        : await answer(scoped, request, url, match, traceId, waitUntil);
+        : noClientIp
+          ? withTrace(routerError(CLIENT_IP_CODE), traceId)
+          : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
     // The user of the session row that the request's token names (rulings 37, 49, and
     // 58 of plan 12n). It comes from a full read or a peek of that row. So a refusal of

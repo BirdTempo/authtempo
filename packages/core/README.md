@@ -1831,6 +1831,15 @@ writes each value under version 1.
   isolate.
 - A request with no client IP counts against one shared IP bucket. A host
   that sets no `cf-connecting-ip` shares one budget across all callers.
+  `limits.noClientIp: "refuse"` ends the shared bucket: `handle` then
+  answers 403 `client_ip_missing` to a request with no client IP, before
+  any route. An in-process call of `auth.api` with `ip: null` throws at its
+  first per-IP limit.
+- Each limit has a fixed window. `limits.windows` gives a limit family
+  another window, such as `"otp:email": { max: 5 }`. A higher `max` lets a
+  caller try more, so the defaults are the reviewed numbers. Core refuses
+  a family that it does not know, and the six families whose window comes
+  from another setting (`LIMITS_FROM_SETTINGS`).
 - Off Workers, a caller can set `cf-connecting-ip` and rotate it past the
   per-IP limit. Pass a `clientIp` function that reads the header your
   trusted proxy sets.

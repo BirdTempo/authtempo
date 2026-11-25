@@ -36,11 +36,19 @@ export function windowSeconds(text: string): number | null {
  * Each row's Window and Maximum also equal the window of each `limit` call
  * of its family in core (ruling 41 I1 of plan 12i). A part that the
  * code reads from a setting must name a setting in the cell.
+ *
+ * `fromSettings` is the key list of `LIMITS_FROM_SETTINGS` of core: the
+ * families that `limits.windows` refuses, because another setting gives
+ * their window. The check holds that list to the scan, both ways. A family
+ * with a window part from a setting must be in the list, or the config takes
+ * a window for it that the code then ignores for that part. A family in the
+ * list must have such a part, or the config refuses a window that works.
  */
 export function checkLimits(
   html: string,
   families: readonly string[],
   code: { facts: readonly LimitWindowFact[]; failures: readonly string[] },
+  fromSettings?: readonly string[],
 ): CheckReport {
   const rows = tableRows(html, "Key");
   const r: CheckReport = {
@@ -97,5 +105,21 @@ export function checkLimits(
   }
   r.counts.compared = compared;
   for (const f of families) if (!seen.has(f)) r.failures.push(`family ${f} has no row`);
+  if (fromSettings !== undefined) {
+    const scanned = new Set(
+      code.facts.filter((f) => f.seconds === null || f.max === null).map((f) => f.family),
+    );
+    for (const f of scanned)
+      if (!fromSettings.includes(f))
+        r.failures.push(
+          `family ${f} takes a part of its window from a setting, and LIMITS_FROM_SETTINGS of core does not list it`,
+        );
+    for (const f of fromSettings)
+      if (!scanned.has(f))
+        r.failures.push(
+          `LIMITS_FROM_SETTINGS of core lists ${f}, and each limit call of it has a window of numbers`,
+        );
+    r.counts.fromSettings = fromSettings.length;
+  }
   return requireCounts(r, ["families", "rows", "calls", "compared"]);
 }
