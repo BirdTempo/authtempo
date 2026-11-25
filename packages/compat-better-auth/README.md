@@ -280,7 +280,9 @@ sets the factor up again on authtempo. A new `secret` opens no sealed secret,
 so every user with the factor on fails the code and the backup codes until the
 factor is turned off for them. The setup takes the password at every path:
 `/two-factor/enable` passes it into core's setup, and core's own `POST
-/totp/setup` takes `{ password }` too, so a session alone sets up no factor. A
+/totp/setup` takes `{ password }` or an email code, so a session alone sets up
+no factor. `twoFactor({ allowPasswordless: true })` of Better Auth lets a
+session alone set up TOTP, so this package refuses it at start. A
 wrong password answers `INVALID_PASSWORD` (400) and writes no row. The limits
 that bind are per user, on every code check: 10 per 15 minutes and 30 per 24
 hours. A person who has the password or a stolen session can use up that

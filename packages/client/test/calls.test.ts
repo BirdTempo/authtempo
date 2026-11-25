@@ -174,6 +174,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.oauth.grants();
     await c.oauth.revoke({ clientId: "cl" });
     await c.totp.setup({ password: "p" });
+    await c.totp.setup({ emailCode: "123456" });
     await c.totp.enable({ code: "1" });
     await c.totp.verify({ challenge: "c", code: "1" });
     await c.totp.disable({ code: "1" });

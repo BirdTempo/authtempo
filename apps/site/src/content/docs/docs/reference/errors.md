@@ -386,7 +386,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /password/verify/code`](/docs/reference/routes/#post-password-verify-code), [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /phone/verify`](/docs/reference/routes/#post-phone-verify), [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /password/verify/code`](/docs/reference/routes/#post-password-verify-code), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /phone/verify`](/docs/reference/routes/#post-phone-verify), [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
 
 <h3 id="too_many_attempts"><code>too_many_attempts</code> 400</h3>
 
@@ -395,7 +395,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /password/verify/code`](/docs/reference/routes/#post-password-verify-code), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /phone/verify`](/docs/reference/routes/#post-phone-verify), [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /password/verify/code`](/docs/reference/routes/#post-password-verify-code), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /phone/verify`](/docs/reference/routes/#post-phone-verify), [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
 
 <h3 id="totp_enabled"><code>totp_enabled</code> 409</h3>
 

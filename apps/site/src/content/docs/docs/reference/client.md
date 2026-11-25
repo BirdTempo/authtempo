@@ -121,7 +121,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.multiSession.switch({ sessionId })` | `POST /multi-session/switch` | `PublicSession` of the session that is now active |
 | `client.multiSession.signOut({ sessionId })` | `POST /multi-session/sign-out` | `{ ok: true }`. It ends one session of this browser; `signOut()` ends each one |
 | `client.lastMethod()` | none | The `LastMethod` of the last sign-in in this browser, from the last method cookie, or `null`. A value outside core's closed set reads as `null`. It names a method, never an account |
-| `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
+| `client.totp.setup({ password })` or `client.totp.setup({ emailCode })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
 | `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
 | `client.totp.disable({ code })` | `POST /totp/disable` | `{ ok: true }` |

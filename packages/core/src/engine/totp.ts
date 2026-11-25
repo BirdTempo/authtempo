@@ -25,6 +25,7 @@ import {
   upgradeProof,
   upgradeSteps,
 } from "./anonymous.js";
+import { proveReauthCode } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { isLastMethod, type LastMethod } from "./last-method.js";
@@ -303,17 +304,24 @@ export async function proveUserFactor(
 }
 
 /**
- * The setup's input: the session and the user's password (plan 9f final fix
- * wave, review I-1). The session replaced the user id in plan 12p: its
- * `proved` flag must hold.
+ * The setup's input: the session and one proof (plan 9f final fix wave,
+ * review I-1). The session replaced the user id in plan 12p: its `proved`
+ * flag must hold. The proof is `password` or `emailCode`, exactly one: both
+ * or neither answers `invalid_body`. It is one interface with two optional
+ * fields, not a union, so each caller of plan 9f keeps compiling, and the
+ * check of the claim-rule page still reads `session` from it.
  */
 export interface TotpSetupInput {
   /** The session that sets up the factor, with its user. */
   session: ResolvedSession;
-  password: string;
+  /** The user's password. */
+  password?: string | undefined;
+  /** A code of `POST /reauth/email` that the user reads in the mailbox. */
+  emailCode?: string | undefined;
   /**
-   * Not read since plan 9h: the setup counts per user only
-   * (`totp-setup:user`). Kept so that the callers of plan 9f keep compiling.
+   * The client IP, for the verify limit of an email code (`otp-verify:ip`).
+   * The password proof does not read it: the setup counts per user
+   * (`totp-setup:user`, plan 9h).
    */
   ip?: string | null | undefined;
   issuer?: string | undefined;
@@ -321,14 +329,22 @@ export interface TotpSetupInput {
 
 /**
  * The secret, the key URI, and the backup codes for a new factor (plan 9f).
- * Needs the user's password and a proved account (a verified email, or no
- * address and not anonymous: `provedAccount`). The password check is
- * `checkUserPassword` under its own key, `totp-setup:user` 5 per 15 minutes
- * (plan 9h), with the dummy verify, and `invalid_credentials` on a miss,
- * before any row write. A session alone
- * must not set up the factor: a session thief would enroll an own
+ * Needs one proof and a proved account (a verified email, or no address and
+ * not anonymous: `provedAccount`). The proof is the user's password, or a
+ * code of `POST /reauth/email`. Each try counts on the setup's own key,
+ * `totp-setup:user` 5 per 15 minutes (plan 9h), before any row write. The
+ * password check is `checkUserPassword`, with the dummy verify, and
+ * `invalid_credentials` on a miss. The email code is `proveReauthCode`: the
+ * verify limits of a mailed code, `invalid_code` on a miss, and a right code
+ * is spent. A deployment with no `password` has the email code only, and a
+ * deployment with no `emailOtp` has the password only: the other proof
+ * answers `not_found` before the limit, the same for every user. A session
+ * alone must not set up the factor: a session thief would enroll an own
  * authenticator, the enable would end the owner's sessions, and every later
- * password sign-in of the owner would ask for the thief's code. A factor
+ * sign-in of the owner would ask for the thief's code. The email code keeps
+ * that rule: the thief of a session does not read the owner's mailbox. A
+ * person who reads the mailbox can reset the password, so the email code
+ * gives no more than the password gives. A factor
  * that is on answers `totp_enabled`; an unconfirmed setup is replaced in
  * place, so one row per user stays. The backup codes pass only after
  * `enable`.
@@ -340,12 +356,22 @@ export async function setupTotp(
   const totp = config.totp;
   if (!totp) return fail("not_found");
   const userId = input.session.user.id;
+  const { password, emailCode } = input;
+  // Exactly one proof. No proof is the case that the rule exists for: a
+  // session alone sets up nothing.
+  if ((password === undefined) === (emailCode === undefined)) return fail("invalid_body");
+  // A proof that the deployment does not have: the answer depends on the
+  // config only, so the limit counts no try for it (as in `reauthenticate`).
+  if (password !== undefined ? !config.password : !config.emailOtp) return fail("not_found");
   if (!(await limit(config, "totp-setup:user", userId, SETUP_PER_USER)))
     return fail("rate_limited");
-  const proved = await checkUserPassword(config, userId, input.password);
+  const proved =
+    password !== undefined
+      ? await checkUserPassword(config, userId, password)
+      : await proveReauthCode(config, input.session.user, emailCode ?? "", input.ip ?? null);
   if (!proved.ok) return fail(proved.code);
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  // checkUserPassword found the password row; a user deleted since then gets no factor.
+  // The proof passed; a user deleted since then gets no factor.
   if (!user) return fail("invalid_credentials");
   // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
   // The user as read now, with the flag of the caller's session (plan 12p).

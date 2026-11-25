@@ -153,7 +153,7 @@ describe("the two-factor options (plan 9f)", () => {
     ).toEqual(
       [
         "plugins[two-factor].accountLockout: core has no account lockout; pass { enabled: false }. Core caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
-        "plugins[two-factor].allowPasswordless: core asks for the password at every change of the factor",
+        "plugins[two-factor].allowPasswordless: core asks for a proof at every change of the factor, and a session alone is no proof",
         "plugins[two-factor].backupCodeOptions.amount: core takes an integer from 5 to 20",
         "plugins[two-factor].backupCodeOptions.customBackupCodesGenerate: core makes its own backup codes",
         "plugins[two-factor].backupCodeOptions.length: core takes an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)",

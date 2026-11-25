@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
-import { checkRoutes } from "../scripts/check-routes.ts";
+import { checkRoutes, schemaKeys } from "../scripts/check-routes.ts";
 import { routeAnchor } from "../scripts/lib/anchors.ts";
 
 // Six real entries and their rows on a page in the forms of plan 11g Task 9.
@@ -122,6 +122,25 @@ describe("checkRoutes", () => {
     expect(r.failures).toEqual([
       "POST /sign-out: Needs names session, none; ROUTES says none, session",
     ]);
+  });
+
+  it("reads the keys of a body of exactly one form of a list", () => {
+    const password = { type: "object", properties: { password: {} }, required: ["password"] };
+    const code = { type: "object", properties: { emailCode: {} }, required: ["emailCode"] };
+    // The body of POST /totp/setup: each key is optional, because one form has it.
+    expect(schemaKeys({ oneOf: [password, code] })).toEqual(["password?", "emailCode?"]);
+    // A key that every form requires stays required.
+    const both = {
+      type: "object",
+      properties: { id: {}, emailCode: {} },
+      required: ["id", "emailCode"],
+    };
+    const one = { type: "object", properties: { id: {}, password: {} }, required: ["id"] };
+    expect(schemaKeys({ oneOf: [both, one] })).toEqual(["id", "emailCode?", "password?"]);
+    // A form that is no object gives no keys, so the cell fails as before.
+    expect(schemaKeys({ oneOf: [password, { type: "string" }] })).toBeNull();
+    expect(schemaKeys({ type: "string" })).toBeNull();
+    expect(schemaKeys(password)).toEqual(["password"]);
   });
 
   it("fails when the Input cell differs from the document", () => {

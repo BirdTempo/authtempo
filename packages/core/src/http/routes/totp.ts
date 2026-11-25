@@ -92,11 +92,8 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, setupBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await setupTotp(ctx.config, {
-          session: s.resolved,
-          password: body.value.password,
-          ip: ctx.ip,
-        });
+        // The schema passed exactly one proof, and the engine holds the same rule.
+        const r = await setupTotp(ctx.config, { session: s.resolved, ip: ctx.ip, ...body.value });
         return send(respond(r), s.renewed);
       },
     },

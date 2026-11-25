@@ -871,12 +871,14 @@ export interface Client {
   totp: {
     /**
      * The secret, the key URI, and the backup codes, each answered once. Takes
-     * the user's password: a wrong one answers `invalid_credentials`, and no
-     * setup is written.
+     * one proof: the user's password, or a code of `reauth.requestEmailCode()`
+     * for a user with no password. A wrong password answers
+     * `invalid_credentials`, a wrong code answers `invalid_code`, and no setup
+     * is written.
      */
-    setup(input: {
-      password: string;
-    }): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
+    setup(
+      input: { password: string } | { emailCode: string },
+    ): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
     enable(input: { code: string }): Promise<ClientResult<TotpStatusJSON>>;
     verify(input: {
       challenge: string;
@@ -1660,9 +1662,11 @@ export function createClient(options: ClientOptions): Client {
   };
   const totp: Client["totp"] = {
     setup: (input) =>
-      send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
-        password: input.password,
-      }),
+      send<{ secret: string; uri: string; backupCodes: string[] }>(
+        "totp.setup",
+        // One proof, and no other key of the input.
+        "password" in input ? { password: input.password } : { emailCode: input.emailCode },
+      ),
     enable: (input) => changes(send<TotpStatusJSON>("totp.enable", input)),
     verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
       changes(
