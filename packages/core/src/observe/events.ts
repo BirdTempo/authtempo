@@ -13,6 +13,7 @@ import {
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
   PATCH_SHAPE_REFUSALS,
+  REQUEST_HOOK_POINTS,
   SCIM_HOOK_POINTS,
   SESSION_END_REASONS,
   SESSION_HOOK_POINTS,
@@ -124,7 +125,7 @@ const COUNT = { kind: "count" } as const;
 
 const enumOf = (values: readonly string[]) => ({ kind: "enum", values }) as const;
 
-/** Every hook name, read from the eight hook point constants (sso and scim of plan 12d, anonymous of plan 12i). */
+/** Every hook name, read from the nine hook point constants (sso and scim of plan 12d, anonymous of plan 12i, request of 2026-11-25). */
 const HOOK_NAMES: readonly string[] = [
   ...Object.keys(ORGANIZATION_HOOK_POINTS).map((p) => `organization.${p}`),
   ...Object.keys(SESSION_HOOK_POINTS).map((p) => `session.${p}`),
@@ -134,6 +135,7 @@ const HOOK_NAMES: readonly string[] = [
   ...Object.keys(SSO_HOOK_POINTS).map((p) => `sso.${p}`),
   ...Object.keys(SCIM_HOOK_POINTS).map((p) => `scim.${p}`),
   ...Object.keys(ANONYMOUS_HOOK_POINTS).map((p) => `anonymous.${p}`),
+  ...Object.keys(REQUEST_HOOK_POINTS).map((p) => `request.${p}`),
 ];
 
 /** The key of each entry of ROUTES, `<method> <path>`. */
@@ -465,9 +467,10 @@ export const EVENTS = {
     hook: enumOf(HOOK_NAMES),
     errorName: ERROR_NAME,
   }),
+  // No `rowId` for `request.after`: a request has no row, and the event carries its route.
   "hook.after_failed": fault("error", "authtempo: after hook failed", {
     hook: enumOf(HOOK_NAMES),
-    rowId: ROW_ID,
+    rowId: OPTIONAL_ID,
     errorName: ERROR_NAME,
   }),
   "user.patch_refused": fault("error", "authtempo: user patch refused", {
@@ -1086,6 +1089,9 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "anonymous.beforeLink": REFUSAL_EXEMPT,
   // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.
   "anonymous.afterLink": "session.end",
+  "request.before": REFUSAL_EXEMPT,
+  // The router emits `request` for each answer, with its status and its code.
+  "request.after": "request",
 };
 
 /** The `organization.change` event of an `after` point, emitted beside its hook. */

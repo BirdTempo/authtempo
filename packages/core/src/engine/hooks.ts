@@ -1,4 +1,5 @@
 import { ERRORS, type ErrorCode } from "../errors.js";
+import type { RouteKey } from "../http/route-list.js";
 import type { Observer } from "../observe/observer.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { Result } from "../result.js";
@@ -654,6 +655,61 @@ export interface ScimHooks {
   }): Awaitable<void>;
 }
 
+/**
+ * What a request hook gets: the request of one matched route, with no body
+ * stream. Core makes each value new for the hook, so a change of it changes
+ * nothing of the request.
+ */
+export interface RequestHookEvent {
+  /** `"<METHOD> <path>"` of the route list, such as `"POST /magic-link/request"`. The path keeps its parameter names. */
+  route: RouteKey;
+  /** The values of the path parameters, such as `{ provider: "github" }`. */
+  params: Record<string, string>;
+  url: URL;
+  headers: Headers;
+  /** The answer of `clientIp` for the request. */
+  ip: string | null;
+  /**
+   * The JSON body of the request, or `undefined`. Core reads the body once,
+   * through the cap of the route, and the handler then reads the same
+   * bytes. It answers `undefined` for a body that is not JSON, for a
+   * content type other than `application/json`, and for a body that does
+   * not fit the shape limits. It also answers `undefined` on a route with a
+   * body reader of its own: the SCIM routes and the routes of `BODY_CAPS`.
+   * The value can hold a password or a code. Do not log it.
+   */
+  json(): Promise<unknown>;
+}
+
+/** The answer of the route, for `request.after`. */
+export interface RequestAfterEvent extends RequestHookEvent {
+  status: number;
+  /** The code of a failure answer, such as `rate_limited`. Null for a success and for an answer with no code. */
+  code: string | null;
+}
+
+/**
+ * The request points (an integrator report of 2026-11-25). They run in
+ * `handle`, for each request that matched a route of a feature that is on.
+ * An in-process call of `auth.api` runs neither. Core's own rules come
+ * first: the host rule, the client IP rule, the Origin rule, and the
+ * impersonation and anonymous refusals. So a hook never runs for a request
+ * that the router refused, and it never widens a rule or a limit.
+ */
+export interface RequestHooks {
+  /**
+   * Before the handler. `throw hookRefusal("...")` answers 403
+   * `hook_refused` with the message, and the handler does not run. Any
+   * other throw answers 500 `hook_failed` and writes one line.
+   */
+  before?(e: RequestHookEvent): Awaitable<void>;
+  /**
+   * After the handler answered, before core sends the answer. It cannot
+   * change the answer. A throw writes one line, and the answer stays.
+   */
+  after?(e: RequestAfterEvent): Awaitable<void>;
+}
+
 export interface HooksConfig {
   organization?: OrganizationHooks;
   session?: SessionHooks;
@@ -663,6 +719,7 @@ export interface HooksConfig {
   sso?: SsoHooks;
   scim?: ScimHooks;
   anonymous?: AnonymousHooks;
+  request?: RequestHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -675,6 +732,7 @@ export interface ResolvedHooks {
   sso: SsoHooks;
   scim: ScimHooks;
   anonymous: AnonymousHooks;
+  request: RequestHooks;
 }
 
 /** The name in a log line. */
@@ -686,7 +744,8 @@ export type HookName =
   | `operator.${keyof OperatorHooks & string}`
   | `sso.${keyof SsoHooks & string}`
   | `scim.${keyof ScimHooks & string}`
-  | `anonymous.${keyof AnonymousHooks & string}`;
+  | `anonymous.${keyof AnonymousHooks & string}`
+  | `request.${keyof RequestHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -761,6 +820,11 @@ export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {
 export const ANONYMOUS_HOOK_POINTS: Readonly<Record<keyof AnonymousHooks, true>> = {
   beforeLink: true,
   afterLink: true,
+};
+
+export const REQUEST_HOOK_POINTS: Readonly<Record<keyof RequestHooks, true>> = {
+  before: true,
+  after: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */

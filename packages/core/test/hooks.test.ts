@@ -59,6 +59,7 @@ describe("hooks config (plan 9d)", () => {
       sso: {},
       scim: {},
       anonymous: {},
+      request: {},
     });
   });
 
@@ -69,8 +70,9 @@ describe("hooks config (plan 9d)", () => {
     const cases: [unknown, string][] = [
       ["hooks", "hooks must be a plain object"],
       [
-        { request: {} },
-        "hooks.request is not a hook group; core has organization, session, user, identity, operator, sso, scim, and anonymous",
+        // `request` is a group since 2026-11-25, so the unknown group has another name.
+        { response: {} },
+        "hooks.response is not a hook group; core has organization, session, user, identity, operator, sso, scim, anonymous, and request",
       ],
       [
         { organization: { beforeCreate: "x" } },

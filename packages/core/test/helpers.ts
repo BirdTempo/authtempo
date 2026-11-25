@@ -241,6 +241,7 @@ export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
         sso: {},
         scim: {},
         anonymous: {},
+        request: {},
       },
       observe: DEFAULT_OBSERVE,
       clock: systemClock,

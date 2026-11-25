@@ -55,7 +55,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. Set `operator.secretHash` or `operator.secrets`, not both. |
 | `openapi` | `boolean` | `false` | Serves `GET <basePath>/openapi.json`, the OpenAPI document of the routes that the config turns on. |
-| `hooks` | object | no hook | The groups `organization`, `session`, `user`, and `identity`. Any other group is refused. |
+| `hooks` | object | no hook | The groups `organization`, `session`, `user`, `identity`, `operator`, `sso`, `scim`, `anonymous`, and `request`. Any other group is refused. |
 | `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
 
 ## Cookie
@@ -402,6 +402,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`, `sso`, or `scim`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit, also the rows of SSO and SCIM; send the row to a separate system there. |
 | `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. `expiring` runs once for each expiry notice that the sweep claims, also while `account.notices` is off. See [the expiry notices](/docs/reference/sso-setup/#the-expiry-notices). |
 | `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
+| `hooks.request` | `RequestHooks` | none | `before` and `after` run in `handle` around the handler of each matched route, after each rule of the router. `before` gets the route key, the path parameters, the URL, the headers, the IP, and `json()` for the JSON body. A `hookRefusal` in it answers 403 `hook_refused`, and the handler does not run. `after` also gets the status and the code, and it cannot change the answer. An in-process call of `auth.api` runs neither. [Run your code at a hook point](/docs/guides/hooks/#the-request-points). |
 | `hooks.anonymous` | `AnonymousHooks` | none | Needs `anonymous`. A sign-in from a browser with a live anonymous session replaces the anonymous user. `beforeLink` runs in the sign-in's transaction and can refuse it. `afterLink` runs after the commit, before the anonymous user goes. Move data only when `proof` is `verified`. |
 
 ## Captcha

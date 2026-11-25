@@ -1640,8 +1640,23 @@ const auth = createAuth({
   `auth.caller(request)` for the caller.
 - `createAuth` refuses a hook that is no function, a name that is no hook
   point, and a hook object that is not plain. It refuses a group other than
-  `organization`, `session`, `user`, and `identity`. It refuses
-  organization hooks while `organizations` is off.
+  `organization`, `session`, `user`, `identity`, `operator`, `sso`, `scim`,
+  `anonymous`, and `request`. It refuses organization hooks while
+  `organizations` is off.
+- Request points: `hooks.request.before` and `hooks.request.after` run in
+  `handle`, around the handler of each matched route. They run after each
+  rule of the router, so a request that the router refused runs no hook.
+  An in-process call of `auth.api` runs neither. Each point gets `route`
+  (the route key), `params`, `url`, `headers`, `ip`, and `json()`.
+  `json()` answers the JSON body through the cap of the route, and the
+  handler then reads the same bytes. It answers `undefined` for a body
+  that is not JSON, and on the routes with a body reader of their own: the
+  SCIM routes, the SAML ACS, and the routes of `BODY_CAPS`. A
+  `hookRefusal` in `before` answers 403 `hook_refused`, and the handler
+  does not run. Any other throw answers 500 `hook_failed`. `after` also
+  gets `status` and `code`, and it cannot change the answer. Each value is
+  new for the hook, so a change of it changes nothing of the request. The
+  body of a sign-in holds a password or a code: do not log it.
 
 ### Limits
 

@@ -353,6 +353,15 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
         const key = keyOf(config, matchRoute, request.method, new URL(request.url).pathname);
         // The mark of `errorRedirect` is on res, not on its clone.
         const record = await judge(request, res.clone(), key, m.redirectCode(res));
+        // With `hooks.request.before`, each route answers the two hook codes, and no entry
+        // declares them for that cause. Only a config with that hook gets this pass, so a
+        // route with a lifecycle hook must still declare its own `hook_refused`.
+        if (
+          config.hooks.request.before !== undefined &&
+          (record.code === "hook_refused" || record.code === "hook_failed") &&
+          record.verdict === `the code ${record.code} is not declared`
+        )
+          record.verdict = "ok";
         appendFileSync(FILE, `${JSON.stringify(record)}\n`);
         return res;
       };
