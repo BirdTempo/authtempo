@@ -15,7 +15,13 @@ import { FIELD_KINDS } from "@authtempo/core/redact";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { readChangelogFiles } from "../src/data/changelogs.ts";
-import { COMPARE_ROWS, HOSTED_MODELS, otherNames } from "../src/data/compare.ts";
+import {
+  BETTER_AUTH_READ,
+  BETTER_AUTH_VERSION,
+  COMPARE_ROWS,
+  HOSTED_MODELS,
+  otherNames,
+} from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
@@ -497,6 +503,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         // Outside a git checkout this is an error, and check-facts fails with it (re-review R1).
         tracked: trackedFiles(REPO),
         today: new Date(),
+        betterAuth: { version: BETTER_AUTH_VERSION, read: BETTER_AUTH_READ },
       }),
   },
   // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route, a

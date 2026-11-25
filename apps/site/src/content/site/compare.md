@@ -8,6 +8,8 @@ This page puts authtempo beside Better Auth and the hosted providers, and it sta
 
 Each row names its source and the day we read it.
 
+The day of a row is the older read of its two cells. We read each Better Auth cell again at version 1.7.27 on 2026-11-25.
+
 This page names no price. Prices change without notice, and we do not hold them.
 
 ## Where authtempo does more
