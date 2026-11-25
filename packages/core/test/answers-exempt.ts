@@ -310,6 +310,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /second-factor/passkey/options",
   "POST /session/refresh",
   "POST /sessions/revoke",
+  "POST /sessions/revoke-all",
   "POST /sessions/revoke-others",
   "POST /sign-out",
   "POST /social/:provider/link",

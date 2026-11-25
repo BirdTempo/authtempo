@@ -189,13 +189,11 @@ export async function accountRoute(
       }
       case "/revoke-other-sessions":
         return answer(await core("POST", "/sessions/revoke-others", {}), status);
-      case "/revoke-sessions": {
-        const others = await core("POST", "/sessions/revoke-others", {});
-        if (!others.ok) return answer(others, status);
-        // Core's own revoke of the caller's session clears the cookie by core's rule.
-        const own = (await caller()).session.id;
-        return answer(await core("POST", "/sessions/revoke", { id: own }), status);
-      }
+      case "/revoke-sessions":
+        // One call and one transaction. Before, the shim ended the others and then
+        // the caller's own session: a failure of the second call left the caller
+        // signed in. Core's route clears the cookie by core's rule.
+        return answer(await core("POST", "/sessions/revoke-all", {}), status);
       case "/update-user": {
         // Plan 12i Task 16: the username goes to core's own route first.
         const { username, rest } = usernameOf(body, mapped.plugins.has("username"));

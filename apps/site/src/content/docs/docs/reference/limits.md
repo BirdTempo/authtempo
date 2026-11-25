@@ -81,7 +81,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `token-use:to:<tokenId>` | The token's `rateLimitSeconds` | The token's `rateLimitMax` | Each call of one organization token with a window, by the rule of `token-use:tk:<tokenId>` |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
-| `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
+| `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke, revoke-others, and revoke-all together |
 | `user-update:user:<userId>` | 15 minutes | 30 | Profile update |
 | `passkey-rename:user:<userId>` | 15 minutes | 30 | Passkey rename, also for an unknown id. A refused name counts no try |
 | `email-change:user:<userId>` | 1 hour | 5 | Change of address request |

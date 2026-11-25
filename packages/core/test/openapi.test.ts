@@ -105,7 +105,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
     // Plan 13a Task 0 adds the 13 routes of the enterprise setup.
     // Plan 13b Task 0 adds GET /organizations/audit.
-    expect(keys.length).toBe(223);
+    // POST /sessions/revoke-all adds one: the end of every session of the user in one call.
+    expect(keys.length).toBe(224);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -473,7 +474,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 13a Task 0 adds the 12 JSON answers, the 7 bodies, and the 5 queries of the
     // enterprise setup (the run of the status page is the fifth). GET /sso/setup answers a page.
     // Plan 13b Task 0 adds the answer and the query of GET /organizations/audit.
-    expect([answers, bodies, queries]).toEqual([171, 128, 41]);
+    // POST /sessions/revoke-all adds one JSON answer.
+    expect([answers, bodies, queries]).toEqual([172, 128, 41]);
   });
 
   it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {

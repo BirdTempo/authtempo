@@ -123,6 +123,15 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | `{ ended }`, the count of live sessions that the call ended. Every other session, the second-factor challenges, and the handoff codes go. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
+<h3 id="post-sessions-revoke-all"><code>POST /sessions/revoke-all</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh |
+| Input | None |
+| Answer | `{ ended }`, the count of live sessions that the call ended, with the caller's own. Every session, the second-factor challenges, and the handoff codes go in one transaction, and the answer clears the session cookie. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay. A session JWT of an ended session lives to its `exp` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 <h3 id="post-user-update"><code>POST /user/update</code></h3>
 
 | Field | Value |

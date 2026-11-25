@@ -934,6 +934,12 @@ export interface Client {
     revoke(input: { id: string }): Promise<ClientResult<{ ok: true; current: boolean }>>;
     /** Ends every other session of the person. `ended` is the count. */
     revokeOthers(): Promise<ClientResult<{ ended: number }>>;
+    /**
+     * Ends every session of the person, the caller's own too, in one call.
+     * `ended` is the count, with the caller's session. The caller's session
+     * has ended, and a bearer app clears its token.
+     */
+    revokeAll(): Promise<ClientResult<{ ended: number }>>;
   };
   /** The re-authentication (plan 12a). Each proof makes the session fresh and keeps its token. */
   reauth: {
@@ -1695,6 +1701,8 @@ export function createClient(options: ClientOptions): Client {
         })(),
       ),
     revokeOthers: () => shaped(send<unknown>("sessions.revokeOthers", {}), isEnded),
+    // The caller's own session ends, so the store reads again and the other tabs hear it.
+    revokeAll: () => changes(shaped(send<unknown>("sessions.revokeAll", {}), isEnded)),
   };
   const reauth: Client["reauth"] = {
     password: ({ password, code }) =>

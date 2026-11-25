@@ -38,4 +38,8 @@ export const SESSIONS_CONTRACT = {
   "POST /sessions/revoke-others": {
     answer: { kind: "json", schema: z.strictObject({ ended: z.number().int().min(0) }) },
   },
+  // The count holds the caller's own session, so it is 1 or more.
+  "POST /sessions/revoke-all": {
+    answer: { kind: "json", schema: z.strictObject({ ended: z.number().int().min(0) }) },
+  },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;
