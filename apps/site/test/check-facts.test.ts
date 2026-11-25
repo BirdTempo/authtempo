@@ -352,7 +352,7 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
         .map((r) => r.id)
         .sort();
     expect(of("authtempo")).toEqual(
-      ["a26", "b5", "d11", "e7", "f16", "f18", "f4", "g14", "g3", "g6"].sort(),
+      ["a26", "a27", "b5", "d11", "e7", "f16", "f18", "f4", "g14", "g3", "g6"].sort(),
     );
     expect(of("parity")).toEqual(
       [
@@ -380,9 +380,34 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
         "f2",
         "f3",
         "f6",
+        // The read of 2026-11-25: plans 12d to 12k and the CLI plans shipped each part of these rows.
+        "a28",
+        "a29",
+        // POST /sessions/revoke-all ends every session of the user in one call.
+        "a32",
+        "b4",
+        "b6",
+        "b14",
+        "b15",
+        "b16",
+        "b17",
+        "b18",
+        "b19",
+        "b20",
+        "b21",
+        "b22",
+        "b23",
+        "b33",
+        "b34",
+        "d1",
+        "d4",
+        "d6",
+        "f15",
+        "g2",
+        "g7",
       ].sort(),
     );
-    expect(of("better-auth")).toHaveLength(40);
+    expect(of("better-auth")).toHaveLength(16);
     // Ruling 27: an authtempo row with a lack by design names the lack and its reason.
     for (const id of ["f4", "f16", "g6"])
       expect({
@@ -393,21 +418,9 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
         named: true,
       });
     // Plan 12e (ruling 55): a11, b9, and b10 keep the side, as core signs no PS256 and no ES512.
-    for (const id of [
-      "a11",
-      "a31",
-      "a32",
-      "b10",
-      "b28",
-      "b3",
-      "b31",
-      "b6",
-      "b9",
-      "d5",
-      "e1",
-      "f11",
-      "g8",
-    ])
+    // The read of 2026-11-25: a32 and b6 left this list. POST /sessions/revoke-all ends every
+    // session of the user, and password.verifyBy gives the address check a code (plan 12i Task 20).
+    for (const id of ["a11", "a31", "b10", "b28", "b3", "b31", "b9", "d5", "e1", "f11", "g8"])
       expect({ id, side: COMPARE_ROWS.find((r) => r.id === id)?.side }).toEqual({
         id,
         side: "better-auth",
