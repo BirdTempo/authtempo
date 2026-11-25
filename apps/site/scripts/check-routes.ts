@@ -136,9 +136,24 @@ function inputParts(cell: string): Map<string, { word: string; keys: string[] }>
   }
 }
 
-/** The keys of an object schema: each name, with "?" when the schema does not require it. */
-function schemaKeys(schema: unknown): string[] | null {
-  const s = schema as { properties?: Record<string, unknown>; required?: string[] } | undefined;
+/**
+ * The keys of an object schema: each name, with "?" when the schema does not
+ * require it. A `oneOf` of object schemas is a body of exactly one form of
+ * the list (`POST /totp/setup`: the password or the email code). It gives
+ * each key of each form in the order of the list, with "?" unless every form
+ * requires the key. The free text of the cell then names the forms.
+ */
+export function schemaKeys(schema: unknown): string[] | null {
+  const s = schema as
+    | { properties?: Record<string, unknown>; required?: string[]; oneOf?: unknown[] }
+    | undefined;
+  if (Array.isArray(s?.oneOf) && s.oneOf.length > 0) {
+    const forms = s.oneOf.map(schemaKeys);
+    if (forms.some((f) => f === null)) return null;
+    const lists = forms as string[][];
+    const names = [...new Set(lists.flat().map((k) => k.replace(/\?$/, "")))];
+    return names.map((n) => (lists.every((f) => f.includes(n)) ? n : `${n}?`));
+  }
   if (s?.properties === undefined) return null;
   return Object.keys(s.properties).map((k) => (s.required?.includes(k) ? k : `${k}?`));
 }

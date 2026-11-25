@@ -5,8 +5,19 @@ import { LastMethodJson, OkAnswer, SessionJson, UserJson } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const codeBody = z.object({ code: z.string().max(64) });
-/** The setup takes the password (plan 9f final fix wave, review I-1); the sign-in's length bound applies in `verifyPassword`. */
-export const setupBody = z.object({ password: z.string().max(1024) });
+/**
+ * The setup takes one proof: the password (plan 9f final fix wave, review
+ * I-1), or a code of `POST /reauth/email`. `xor` passes a body that matches
+ * exactly one of the two, so a body with both proofs or with none is
+ * refused. Neither object is strict, as before: a client that sends another
+ * key beside its proof still passes. The type is the union of the two, and
+ * the client's type test holds `client.totp.setup` to it. The sign-in's
+ * length bound applies in `verifyPassword`.
+ */
+export const setupBody = z.xor([
+  z.object({ password: z.string().max(1024) }),
+  z.object({ emailCode: z.string().min(1).max(16) }),
+]);
 export const verifyBody = z.object({
   challenge: z.string().max(64),
   code: z.string().max(16).optional(),

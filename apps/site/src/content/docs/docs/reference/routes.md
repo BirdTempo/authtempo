@@ -507,9 +507,9 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
-| Input | JSON `{ password }` |
+| Input | JSON `{ password?, emailCode? }`. Exactly one proof: `{ password }`, or `{ emailCode }` with a code of [`POST /reauth/email`](#post-reauth-email) |
 | Answer | `{ secret, uri, backupCodes }`, each answered once. `backupCodes` is empty when another method is on, because the factor keeps its list |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-totp-enable"><code>POST /totp/enable</code></h3>
 

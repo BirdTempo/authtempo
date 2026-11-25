@@ -430,11 +430,11 @@ another failure.
 
 A sign-in, a reset, a magic link, an email code, and social can answer `{ twoFactor: { challenge, expiresAt, methods } }` for a user with the second factor on. `methods` lists what passes, in this order: `passkey`, `totp`, `email`, `backup`.
 
-Every call but `totp.verify`, `secondFactor.passkey.verify`, and `secondFactor.email.send` needs a session. A token answers `unauthorized` there. Every call answers `not_found` when the server runs without `password` or with `totp: false`. The passkey calls also answer `not_found` without the `passkey` config.
+Every call but `totp.verify`, `secondFactor.passkey.verify`, and `secondFactor.email.send` needs a session. A token answers `unauthorized` there. Every call answers `not_found` when the server has no `totp`: `totp: false`, or no `password` and no `totp` set. The calls that take a password answer `not_found` when the server runs without `password`. The passkey calls also answer `not_found` without the `passkey` config.
 
 | Call | Does |
 | --- | --- |
-| `totp.setup({ password })` | Answers the secret, the key URI, and the backup codes, each once. The codes are empty when another method is on. |
+| `totp.setup({ password })` or `totp.setup({ emailCode })` | Answers the secret, the key URI, and the backup codes, each once. The codes are empty when another method is on. A user with no password sends the code of `reauth.requestEmailCode()`. |
 | `totp.enable({ code })` | Turns TOTP on with a current code. Answers `TotpStatusJSON`. |
 | `totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | Passes a challenge with one proof. Answers `TwoFactorSessionJSON`. |
 | `totp.disable({ code })` | Turns TOTP off with a current code or a backup code. |

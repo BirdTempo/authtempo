@@ -79,7 +79,8 @@ export interface RouteEntry {
   /**
    * The config that turns the route on. `session`, `magicLink`, and `tokens`
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
-   * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
+   * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`,
+   * or `totp` set with `emailOtp`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`;
    * `oauthDevice` needs `oauth` with `device` (plan 12e); `operator`
    * needs `operator.secretHash` (plan 11c) or `operator.secrets` (plan 12f), and `/operator/keys/rotate` also
@@ -853,6 +854,8 @@ export const ROUTES = Object.freeze([
       "invalid_body",
       "rate_limited",
       "invalid_credentials",
+      "invalid_code",
+      "too_many_attempts",
       "email_unverified",
       "totp_enabled",
       "conflict",
