@@ -1,11 +1,18 @@
 {
-  "publish": "2026-11-16T15:00:00Z",
+  "publish": "2026-11-26T09:00:00Z",
   "support": [
     {
       "minor": "0.1",
-      "status": "current",
+      "status": "security",
       "released": "2026-11-16",
+      "securityUntil": "2027-02-26",
       "schemaFrom": [16]
+    },
+    {
+      "minor": "0.2",
+      "status": "current",
+      "released": "2026-11-26",
+      "schemaFrom": [18]
     }
   ],
   "resources": [

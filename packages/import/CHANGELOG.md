@@ -1,5 +1,37 @@
 # @authtempo/import
 
+## 0.2.0
+
+### Patch Changes
+
+- 1a22e8a: The README and one comment of the package name the old binary `authtempo-import` no more. Release 0.2.0 of `@authtempo/cli` removes that binary.
+- Updated dependencies [c79bf6c]
+- Updated dependencies [996480b]
+- Updated dependencies [d2be91f]
+- Updated dependencies [c657924]
+- Updated dependencies [d182103]
+- Updated dependencies [e386ff8]
+- Updated dependencies [227d5c6]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [b456151]
+- Updated dependencies [bc4768d]
+- Updated dependencies [8b3ccc6]
+- Updated dependencies [2c2dcbd]
+- Updated dependencies [7aa0599]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [5a0384d]
+- Updated dependencies [1b83f8c]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [f6ce98f]
+- Updated dependencies [01e1b69]
+- Updated dependencies [35325a9]
+- Updated dependencies [4d41f15]
+  - @authtempo/core@0.2.0
+  - @authtempo/adapter-d1@0.2.0
+  - @authtempo/compat-better-auth@0.2.0
+  - @authtempo/legacy-hashes@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

@@ -1,5 +1,62 @@
 # @authtempo/client
 
+## 0.2.0
+
+### Minor Changes
+
+- 45bcab6: Add `client.organizations.audit.list` and `client.organizations.audit.export`. The list reads one page of `GET /organizations/audit` and answers `{ rows, next }`. Pass `next` as `after` to read the page after it. A 200 with no list of `rows`, or with no `next`, answers `unexpected` with status 200. The export is an async iterator over every row of the query. It reads one page of 100 rows for each request and holds one page at a time. A caller that stops early sends no more requests. A failed page throws its `ClientFailure` after the rows of the pages before it. A 200 that is not a page throws `unexpected` with status 200, so a missing `next` cannot end an export early with no failure. The new types are `OrganizationAuditView` and `OrganizationAuditQuery`.
+  
+  `client.sso.connections.list` now answers `SsoConnectionListedJSON[]`: each connection with its `status`, as `GET /sso/connections` answers it. `SsoConnectionListedJSON` is `SsoConnectionJSON` with `status`, so code that types a listed connection as `SsoConnectionJSON` still compiles.
+- 41ad872: The client knows the core code `statement_not_grantable`, with its text. A role create or update answers it when the `permissions` of a stored role name `audit`.
+- ee41ba3: The new config block `limits` changes two rules of the rate limits. Without it, each limit works as before.
+  
+  `limits.windows` gives a limit family another window, such as `"otp:email": { max: 5 }`. `max` is from 1 to 100000, and `seconds` is from 1 to 86400. Core refuses an unknown family at the start. It also refuses the six families whose window comes from another setting. A higher `max` lets a caller try more.
+  
+  `limits.noClientIp: "refuse"` ends the shared count of the requests with no client IP. `handle` answers 403 `client_ip_missing` to such a request before any route. An in-process call of `auth.api` with `ip: null` throws at its first per-IP limit.
+  
+  The client has a text for the new code `client_ip_missing`. The compat error map names it.
+- 04792aa: Add `POST /sessions/revoke-all`, `api.session.revokeAll`, and `client.sessions.revokeAll()`. The call ends every session of the user, the caller's own too, in one transaction. It also ends the second-factor challenges and the handoff codes. The trusted devices, the API tokens, and the OAuth grants stay, as with `POST /sessions/revoke-others`. The call needs a fresh session, and it shares the limit key `session-revoke:user` with the two other revoke routes. The answer is `{ ended }`, the count of ended sessions with the caller's own, and the route clears the session cookie. A session JWT of an ended session lives to its `exp`.
+  
+  `POST /revoke-sessions` and `auth.api.revokeSessions` of the Better Auth compat layer now use this one call. Before, they ended the other sessions and then the caller's session in two calls. A failure of the second call left the caller signed in.
+- d64537a: The TOTP setup takes an email code in place of the password. `POST /totp/setup` takes `{ password }` or `{ emailCode }`, exactly one. The code is the code of `POST /reauth/email`, and a right code is spent. `api.totp.setup` takes `{ session, password }` or `{ session, emailCode, ip }`, and `client.totp.setup` takes `{ password }` or `{ emailCode }`. A wrong code answers `invalid_code`, the spent guesses of a code answer `too_many_attempts`, and both write no row. Each try counts on `totp-setup:user`, 5 per 15 minutes, as before.
+  
+  `totp` no longer needs `password`. With no `password`, the factor stays off by default, so an upgrade turns nothing on. Set `totp: {}` to turn it on: the gate then covers the magic link, the email code, and social, and the setup takes the email code. A config with `totp` and neither `password` nor `emailOtp` is refused at start with a new message. A session alone still sets up no factor: the thief of a session does not read the owner's mailbox.
+  
+  A proof that the deployment lacks answers `not_found` and counts no try: `password` with no `password` config, and `emailCode` with `emailOtp: false`. The passkey method and the email method still take the password.
+  
+  The Better Auth compat layer still refuses `allowPasswordless: true`. Its refusal text changes: core asks for a proof at every change of the factor, and a session alone is no proof.
+- 4d41f15: Add the SSO setup link. An owner of an organization mints a link and sends it to the IT admin of a customer. The IT admin opens it and fills in drafts: a domain, a connection, and a SCIM token. A test sign-in must pass for the current draft. The IT admin hands back, and the owner reads the preview and activates. Nothing goes live before the activation. The activation sends the `version` of the preview that the owner read. It answers `conflict` when the draft, a domain, or the pending SCIM token changed after that read. The sweep deletes the setup links, setup sessions, and test runs 30 days after they expired. It deletes the pending SCIM token of each deleted link too. It counts the rows in `ssoSetupRows`.
+  
+  It is off by default. Turn it on with `sso: { setup: {} }`. It needs `sso` and `organizations`. It throws a `ConfigError` at start when `account.notices` is `false`, because the owners learn of a ready setup by a notice. `ttlHours` sets the life of a link from 1 to 168 hours, and the default is 72. `page` replaces the setup page of core. The hook `hooks.sso.setupReady` runs after each handback.
+  
+  The new routes are `POST /sso/setup-links/create`, `GET /sso/setup-links/list`, `GET /sso/setup-links/get`, `POST /sso/setup-links/revoke`, `POST /sso/setup-links/activate`, `GET /sso/setup`, `POST /sso/setup/open`, `POST /sso/setup/domains/add`, `POST /sso/setup/domains/verify`, `POST /sso/setup/connection`, `POST /sso/setup/scim-token`, `POST /sso/setup/handback`, and `GET /sso/setup/status`. The new codes are `setup_link_invalid`, `setup_link_limit`, and `setup_not_tested`. The new notices are `sso_setup_ready` and `sso_activated`. `GUIDES` holds one typed guide for each of Okta, Entra ID, Google Workspace, generic SAML, and generic OIDC. The client has `sso.setupLinks` and `sso.setup`.
+  
+  No guide was checked on a real tenant. Each guide shows the date of its read, and a label that the docs do not confirm shows as unconfirmed.
+  
+  One risk stays. A person who steals a link before the IT admin uses it can fill a draft that names the provider of the thief. If the owner activates it after a quick read of the preview, the thief can sign in. Every owner gets the notice of a ready setup. Read the preview, and ask the IT admin by a second channel before you activate.
+
+### Patch Changes
+
+- Updated dependencies [c79bf6c]
+- Updated dependencies [d182103]
+- Updated dependencies [e386ff8]
+- Updated dependencies [227d5c6]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [b456151]
+- Updated dependencies [bc4768d]
+- Updated dependencies [8b3ccc6]
+- Updated dependencies [2c2dcbd]
+- Updated dependencies [7aa0599]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [5a0384d]
+- Updated dependencies [1b83f8c]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [01e1b69]
+- Updated dependencies [35325a9]
+- Updated dependencies [4d41f15]
+  - @authtempo/core@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

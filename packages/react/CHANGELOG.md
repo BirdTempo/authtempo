@@ -1,5 +1,17 @@
 # @authtempo/react
 
+## 0.2.0
+
+### Patch Changes
+
+- Updated dependencies [45bcab6]
+- Updated dependencies [41ad872]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [4d41f15]
+  - @authtempo/client@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

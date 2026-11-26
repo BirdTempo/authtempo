@@ -6,7 +6,8 @@ This file tells you how to report a fault in authtempo, and what the owner does 
 
 | Minor | Status | Released | Security fixes until | Schema versions |
 | --- | --- | --- | --- | --- |
-| 0.1 | current | 2026-11-16 | none | 16 |
+| 0.1 | security | 2026-11-16 | 2027-02-26 | 16 |
+| 0.2 | current | 2026-11-26 | none | 18 |
 
 The current minor gets every fix. The previous minor gets security fixes for 3 months after the next minor ships. After that date, the previous minor is unsupported. A database at a schema version of a supported minor gets to the current schema version with one `authtempo migrate`. The table comes from `release/support.json`, and a check holds this file to it.
 
