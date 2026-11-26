@@ -48,8 +48,21 @@ export interface HostedModel {
   read: string;
 }
 
-/** The day of the review: every Better Auth cell comes from it. */
+/**
+ * The day of the review. Each Better Auth cell came from it, and so did each
+ * authtempo cell of a `row()`. A row keeps this day while one of its cells
+ * is that old: a row is as old as its older cell.
+ */
 const REVIEW_READ = "2026-10-14";
+/**
+ * The version of Better Auth that each Better Auth cell holds for, and the
+ * day of that read. On that day each cell was read again in the packages of
+ * this version on npm and in the docs. 70 cells held, and 4 changed: d5, g7,
+ * g10, and g14. check-facts holds each npm source and the text of the page
+ * to these two values.
+ */
+export const BETTER_AUTH_VERSION = "1.7.27";
+export const BETTER_AUTH_READ = "2026-11-25";
 /** The day of the fresh read of the merged plans 11g, 12a, 12b, and 12c, and of the guides. */
 const CODE_READ = "2026-10-19";
 
@@ -57,8 +70,11 @@ const CODE_READ = "2026-10-19";
 export const BETTER_AUTH_DOCS_BASE = "https://better-auth.com/docs/";
 /** A docs page of Better Auth: its path must be a member of BETTER_AUTH_DOCS (re-review R6). */
 const doc = (path: BetterAuthDoc) => `${BETTER_AUTH_DOCS_BASE}${path}`;
-/** The package that the review read in code, at its version. */
-const NPM = "npm better-auth@1.7.2,";
+/** The package that the read of BETTER_AUTH_READ read in code, at its version. */
+const NPM = `npm better-auth@${BETTER_AUTH_VERSION},`;
+/** Another package of Better Auth at the same version: `auth` is its CLI, and `@better-auth/core` its core. */
+const npm = (name: "auth" | "@better-auth/core", file: string) =>
+  `npm ${name}@${BETTER_AUTH_VERSION}, ${file}`;
 /** The releases of Better Auth on GitHub. */
 const RELEASES = "https://github.com/better-auth/better-auth/releases";
 
@@ -122,14 +138,15 @@ const SOURCES: Readonly<Record<string, readonly string[]>> = {
   b41: [doc("concepts/users-accounts"), doc("concepts/session-management")],
   d1: [doc("concepts/cli")],
   d4: [doc("plugins/admin")],
-  d5: [doc("concepts/cli")],
+  // The docs page concepts/cli still names Next.js and SQLite only. The code of the CLI has the lists.
+  d5: [npm("auth", "dist/index.mjs")],
   d6: [doc("concepts/cli")],
   d11: [doc("concepts/cli")],
   d12: [doc("plugins/jwt")],
   e1: [doc("plugins/open-api")],
   e7: [doc("reference/errors")],
   e10: [doc("guides/1-7-upgrade-guide")],
-  f2: [doc("reference/security"), `${NPM} dist/context/secret-utils.mjs`],
+  f2: [doc("reference/security"), `${NPM} dist/context/create-context.mjs`],
   f3: [doc("reference/security")],
   f4: [doc("reference/options")],
   f6: [doc("concepts/cookies")],
@@ -148,7 +165,10 @@ const SOURCES: Readonly<Record<string, readonly string[]>> = {
   g10: [RELEASES],
   g11: [RELEASES],
   // The review did not read Better Auth for this row; the authtempo cell comes from this proof.
-  g14: ["examples/worker/proof/bundle-no-node.mjs"],
+  g14: [
+    "examples/worker/proof/bundle-no-node.mjs",
+    npm("@better-auth/core", "dist/async_hooks/index.mjs"),
+  ],
 };
 
 /** The public source of the Better Auth cell of a row. */
@@ -300,7 +320,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "authtempo",
     "Workers with no Node compatibility",
     "Every Worker sets no_nodejs_compat, and a bundle proof fails on any node: import.",
-    "Not checked in the review.",
+    "Loads AsyncLocalStorage from node:async_hooks. With none, it warns that some features may not work.",
   ),
   row(
     "a26",
@@ -687,7 +707,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "parity",
     "OpenTelemetry",
     "@authtempo/observe sends logs, a span for each request, and metrics as OTLP JSON over HTTP.",
-    "OpenTelemetry spans, an experimental option since 1.7.4.",
+    "OpenTelemetry spans, on by default and marked experimental. One option turns them off.",
     [CODE.otlp],
   ),
   moved(
@@ -761,7 +781,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "better-auth",
     "Releases",
     "One version of every package, from 0.1.0.",
-    "Weekly patches on 1.7 and on 1.6.",
+    "Several patches a week on 1.7, and a patch on 1.6 every few weeks. Betas of 1.8 since 2026-10-15.",
   ),
   row(
     "g11",
@@ -776,7 +796,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "better-auth",
     "A new app from the CLI",
     "authtempo init copies a tested example of each stack, and each copy passes its own test. No stack is Next.js.",
-    "The init command covers Next.js and SQLite only.",
+    "The init command detects 13 frameworks, Next.js too. It sets up SQLite, Postgres, MySQL, MSSQL, MongoDB, Drizzle, or Prisma.",
   ),
   moved(
     "a31",

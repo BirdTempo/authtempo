@@ -10,7 +10,13 @@ import { docsPages } from "../scripts/lib/load.ts";
 import { REPO } from "../scripts/lib/paths.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
 import { trackedFiles } from "../scripts/lib/tracked.ts";
-import { COMPARE_ROWS, type CompareRow, type HostedModel } from "../src/data/compare.ts";
+import {
+  BETTER_AUTH_READ,
+  BETTER_AUTH_VERSION,
+  COMPARE_ROWS,
+  type CompareRow,
+  type HostedModel,
+} from "../src/data/compare.ts";
 
 /** The build day of every test (plan 11b Task 6). */
 const TODAY = new Date("2026-10-14");
@@ -306,6 +312,75 @@ describe("checkFacts (plan 11b Task 6)", () => {
     });
     expect(r.failures).toEqual([]);
     expect(r.counts.oldest_days).toBe(180);
+  });
+
+  it("takes an npm source of the package, of its CLI, and of a scoped package", () => {
+    const source = (text: string) =>
+      run({ rows: rows().map((r) => (r.id === "a13" ? { ...r, source: text } : r)) }).failures;
+    for (const text of [
+      "npm better-auth@1.7.27, dist/context/create-context.mjs",
+      "npm auth@1.7.27, dist/index.mjs",
+      "npm @better-auth/core@1.7.27, dist/async_hooks/index.mjs",
+    ])
+      expect([text, source(text)]).toEqual([text, []]);
+    // Another package, a path outside dist, and a version that is no version each fail.
+    for (const text of [
+      "npm left-pad@1.7.27, dist/index.mjs",
+      "npm @other/core@1.7.27, dist/index.mjs",
+      "npm auth@1.7.27, src/index.ts",
+      "npm auth@latest, dist/index.mjs",
+    ])
+      expect([text, source(text)]).toEqual([
+        text,
+        [`cmp-a13 names "${text}", which is not public and not a tracked file`],
+      ]);
+  });
+
+  it("holds each npm source and the page text to the version of the Better Auth read", () => {
+    const stated = "<p>We read each Better Auth cell again at version 1.7.27 on 2026-11-25.</p>";
+    const built = (text: string) => page().replace("<table>", `${text}<table>`);
+    const at = (version: string, text = stated) =>
+      checkFacts({
+        rows: rows().map((r) =>
+          r.id === "a13" ? { ...r, source: `npm better-auth@${version}, dist/index.mjs` } : r,
+        ),
+        models: models(),
+        providers: ["clerk"],
+        built: built(text),
+        files: FILES,
+        tracked: { files: TRACKED },
+        today: TODAY,
+        betterAuth: { version: "1.7.27", read: "2026-11-25" },
+      }).failures;
+    expect(at("1.7.27")).toEqual([]);
+    // A source of the old package beside the new version.
+    expect(at("1.7.2")).toEqual([
+      'cmp-a13 names "npm better-auth@1.7.2, dist/index.mjs", and the Better Auth cells hold for version 1.7.27',
+    ]);
+    // A page that states another version, another day, or nothing.
+    for (const text of [
+      stated.replace("1.7.27", "1.7.2"),
+      stated.replace("2026-11-25", "2026-10-14"),
+      "",
+    ])
+      expect(at("1.7.27", text)).toEqual([
+        'the page does not state "version 1.7.27 on 2026-11-25", the read of the Better Auth cells',
+      ]);
+  });
+
+  it("holds the real rows to the version and the day of the data file", () => {
+    expect([BETTER_AUTH_VERSION, BETTER_AUTH_READ]).toEqual(["1.7.27", "2026-11-25"]);
+    const npm = COMPARE_ROWS.flatMap((r) => r.source.split("; ")).filter((p) =>
+      p.startsWith("npm "),
+    );
+    expect(npm.length).toBeGreaterThan(0);
+    for (const part of npm) expect(part).toContain(`@${BETTER_AUTH_VERSION}, dist/`);
+    // The four cells that the read of 1.7.27 changed.
+    const cell = (id: string) => COMPARE_ROWS.find((r) => r.id === id)?.betterAuth;
+    expect(cell("d5")).toContain("13 frameworks");
+    expect(cell("g7")).toContain("on by default");
+    expect(cell("g10")).toContain("Betas of 1.8");
+    expect(cell("g14")).toContain("node:async_hooks");
   });
 
   it("fails on zero rows", () => {

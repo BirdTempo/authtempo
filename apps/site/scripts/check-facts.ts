@@ -48,9 +48,12 @@ const ENTITIES: Readonly<Record<string, string>> = {
 const PUBLIC_SOURCE = new RegExp(
   [
     String.raw`^https://github\.com/better-auth/better-auth(?:/[A-Za-z0-9._/-]+)?$`,
-    String.raw`^npm better-auth@\d+\.\d+\.\d+, dist/[A-Za-z0-9._/-]+$`,
+    // The package, its CLI `auth`, or a scoped package such as `@better-auth/core`.
+    String.raw`^npm (?:better-auth|auth|@better-auth/[a-z0-9-]+)@\d+\.\d+\.\d+, dist/[A-Za-z0-9._/-]+$`,
   ].join("|"),
 );
+/** The version of an npm source part, or null for another kind of source. */
+const npmVersion = (part: string) => /^npm \S+@(\d+\.\d+\.\d+), /.exec(part)?.[1] ?? null;
 const DOCS = new Set<string>(BETTER_AUTH_DOCS);
 
 /** True for a public source part: a docs page of the list, or a GitHub or npm source. */
@@ -97,6 +100,9 @@ function rowHtml(built: string, id: string): string {
  *    element, and its text names no price.
  * 5. Each part of a source (split at "; ") is public (PUBLIC_SOURCE) or a
  *    file that `tracked` lists (git ls-files).
+ * 6. With `betterAuth`, each npm source names that version, and the page
+ *    states the version and the day of its read. So a cell that was read in
+ *    an older package cannot stay beside the new version on the page.
  */
 export function checkFacts(input: {
   rows: readonly CompareRow[];
@@ -107,6 +113,8 @@ export function checkFacts(input: {
   /** The files that git tracks, or the error of git ls-files (lib/tracked.ts). */
   tracked: { files: ReadonlySet<string> } | { error: string };
   today: Date;
+  /** BETTER_AUTH_VERSION and BETTER_AUTH_READ of the data file. */
+  betterAuth?: { version: string; read: string };
 }): CheckReport {
   const r: CheckReport = {
     name: "check-facts",
@@ -132,6 +140,14 @@ export function checkFacts(input: {
       for (const part of f.source.split("; "))
         if (!isPublic(part) && !tracked.has(part) && !("error" in input.tracked))
           r.failures.push(`${f.id} names "${part}", which is not public and not a tracked file`);
+    if (input.betterAuth !== undefined)
+      for (const part of f.source.split("; ")) {
+        const version = npmVersion(part);
+        if (version !== null && version !== input.betterAuth.version)
+          r.failures.push(
+            `${f.id} names "${part}", and the Better Auth cells hold for version ${input.betterAuth.version}`,
+          );
+      }
     const day = dayOf(f.read);
     if (day === null) {
       r.failures.push(`${f.id} has the read date "${f.read}", not a YYYY-MM-DD day`);
@@ -181,6 +197,15 @@ export function checkFacts(input: {
   if (main === undefined) r.failures.push('the page has no <main id="main"> element');
   const price = PRICE.exec(textOfHtml(main ?? ""));
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);
+  if (input.betterAuth !== undefined) {
+    const stated = `version ${input.betterAuth.version} on ${input.betterAuth.read}`;
+    if (
+      !textOfHtml(main ?? "")
+        .replace(/\s+/g, " ")
+        .includes(stated)
+    )
+      r.failures.push(`the page does not state "${stated}", the read of the Better Auth cells`);
+  }
   r.counts.tracked = tracked.size;
   return requireCounts(
     r,
