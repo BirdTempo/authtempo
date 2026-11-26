@@ -18,6 +18,7 @@ import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
+import { requestAfter, requestBefore } from "./request-hooks.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
 import {
   BODY_CODE,
@@ -648,7 +649,12 @@ export function createRouter(
     // A large read counts on the share of its client: the IP until a session names the user (ruling 59).
     const ip = config.clientIp(request);
     bindBodyClient(request, ipBodyClient(ip));
-    return match.route.handler({
+    // The request points of `hooks.request`: after each rule of the router, around the handler.
+    const key = match.route.key;
+    const hooked = key === undefined ? null : { request, url, key, params: match.params, ip };
+    const refused = hooked && (await requestBefore(scoped, hooked));
+    if (refused) return refused;
+    const res = await match.route.handler({
       request,
       url,
       config: scoped,
@@ -657,5 +663,10 @@ export function createRouter(
       params: match.params,
       waitUntil,
     });
+    if (hooked) {
+      const { code } = outcomeOf(res);
+      await requestAfter(scoped, hooked, { status: res.status, code });
+    }
+    return res;
   }
 }

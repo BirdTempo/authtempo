@@ -105,7 +105,7 @@ Each event has these fields too:
 | `sms.not_sent` | error | `reason: enum` | `authtempo: an SMS after the answer was not sent` |
 | `hook.copy_failed` | error | `hook: enum`, `errorName: errorName` | `authtempo: hook event copy failed` |
 | `hook.before_failed` | error | `hook: enum`, `errorName: errorName` | `authtempo: before hook failed` |
-| `hook.after_failed` | error | `hook: enum`, `rowId: id`, `errorName: errorName` | `authtempo: after hook failed` |
+| `hook.after_failed` | error | `hook: enum`, `rowId?: id`, `errorName: errorName` | `authtempo: after hook failed` |
 | `user.patch_refused` | error | `what: enum` | `authtempo: user patch refused` |
 | `session.patch_refused` | error | `what: enum`, `field?: identifier` | `authtempo: session patch refused` |
 | `user.hold_gave_up` | error | `userId: id` | `authtempo: user hold gave up` |
@@ -217,9 +217,9 @@ An enum field takes only the values of its list. A long list names its count and
 | `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
 | `sms.not_sent.reason` | `capped`, `unavailable`, `timeout` |
 | `claim.mail_failed.method` | `magic_link`, `email_otp` |
-| `hook.copy_failed.hook` | 50 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
-| `hook.before_failed.hook` | 50 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
-| `hook.after_failed.hook` | 50 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.copy_failed.hook` | 52 values: each hook name, `<group>.<point>`, from the nine hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.before_failed.hook` | 52 values: each hook name, `<group>.<point>`, from the nine hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.after_failed.hook` | 52 values: each hook name, `<group>.<point>`, from the nine hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `user.patch_refused.what` | `a value that is not an object`, `a value that cannot be read`, `a value that is not a plain object`, `a field other than name and image`, `a name that breaks the name rule`, `an image that breaks the image rule` |
 | `session.patch_refused.what` | `a value that is not an object`, `a value that cannot be read`, `a value that is not a plain object`, `an ip that is not a string or null`, `a userAgent that is not a string or null`, `an activeOrganizationId that is not a string or null`, `field` |
 | `oauth.client_metadata_refused.why` | 28 values: the fetch guards, `status`, the type and size rules, and each rule of a member. |

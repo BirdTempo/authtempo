@@ -542,6 +542,12 @@ export async function readBodyBytes(
   cap: number,
   client: string = bodyClientOf(request),
 ): Promise<Uint8Array | null> {
+  // The bytes that `hooks.request` read first (`hookBodyBytes`). The stream is spent, and the cap still holds.
+  if (HOOK_BODY.has(request)) {
+    const kept = HOOK_BODY.get(request) ?? null;
+    if (kept !== null && kept.length > cap) throw new BodyTooLarge(cap);
+    return kept;
+  }
   const body = freshBody(request);
   if (body === false) return null;
   const length = request.headers.get("content-length");
@@ -634,6 +640,30 @@ export async function readBodyBytes(
       }
     }
   }
+}
+
+/** The body that `hookBodyBytes` read for a request: bytes, or null for a body that was read before. */
+const HOOK_BODY = new WeakMap<Request, Uint8Array | null>();
+
+/** The routes with a body reader of their own cap: the SCIM writes and the SAML ACS. */
+const OWN_BODY_READER =
+  /^(?:(?:POST|PUT|PATCH|DELETE|GET) \/scim\/v2\/|POST \/sso\/:connectionId\/acs$)/;
+
+/**
+ * The body of `request` for `hooks.request` (an integrator report of
+ * 2026-11-25). It is the one read of the body: the read stops at the cap of
+ * the floor, and the bytes stay with the request, so the handler's read
+ * gets the same bytes and the same cap. `undefined` on a route that this
+ * read must not touch. A route of `BODY_CAPS` reads above the floor and
+ * binds its slow work in its handler, before its read. The SCIM writes and
+ * the SAML ACS read with a cap of their own. A read here would change the
+ * answer of such a route, so the hook gets no body there.
+ */
+export async function hookBodyBytes(request: Request): Promise<Uint8Array | null | undefined> {
+  const key = ROUTE_OF.get(request);
+  if (key === undefined || key in BODY_CAPS || OWN_BODY_READER.test(key)) return undefined;
+  if (!HOOK_BODY.has(request)) HOOK_BODY.set(request, await readBodyBytes(request, BODY_CAP_FLOOR));
+  return HOOK_BODY.get(request) ?? null;
 }
 
 /**

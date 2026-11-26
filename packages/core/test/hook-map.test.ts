@@ -4,6 +4,7 @@ import {
   IDENTITY_HOOK_POINTS,
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
+  REQUEST_HOOK_POINTS,
   SCIM_HOOK_POINTS,
   SESSION_HOOK_POINTS,
   SSO_HOOK_POINTS,
@@ -11,9 +12,10 @@ import {
 } from "../src/engine/hooks.js";
 import { EVENTS, HOOK_EVENTS } from "../src/observe/events.js";
 
-// The eight hook point constants of src/engine/hooks.ts (plan 12h Task 6;
-// plan 12d adds sso and scim, plan 12i adds anonymous). A new constant
-// joins this list and the hook name union.
+// The nine hook point constants of src/engine/hooks.ts (plan 12h Task 6;
+// plan 12d adds sso and scim, plan 12i adds anonymous, and the request
+// points come on 2026-11-25). A new constant joins this list and the hook
+// name union.
 const POINTS: readonly [string, Readonly<Record<string, true>>][] = [
   ["organization", ORGANIZATION_HOOK_POINTS],
   ["session", SESSION_HOOK_POINTS],
@@ -23,6 +25,7 @@ const POINTS: readonly [string, Readonly<Record<string, true>>][] = [
   ["sso", SSO_HOOK_POINTS],
   ["scim", SCIM_HOOK_POINTS],
   ["anonymous", ANONYMOUS_HOOK_POINTS],
+  ["request", REQUEST_HOOK_POINTS],
 ];
 const HOOK_NAMES = POINTS.flatMap(([group, points]) =>
   Object.keys(points).map((p) => `${group}.${p}`),
@@ -44,8 +47,8 @@ describe("the hook map", () => {
     }
     // 44 of plan 12h, sso.beforeSignIn and scim.afterChange of plan 12d, and
     // the two anonymous points of plan 12i, sso.setupReady of plan 13a, and sso.expiring of
-    // plan 13b.
-    expect(HOOK_NAMES).toHaveLength(50);
+    // plan 13b. The two request points come on 2026-11-25.
+    expect(HOOK_NAMES).toHaveLength(52);
   });
 
   it("has no row for a hook point that does not exist", () => {

@@ -327,7 +327,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="hook_refused"><code>hook_refused</code> 403</h3>
 
-- **Meaning:** A before hook of the app threw `hookRefusal(message)`. The body carries `message`.
+- **Meaning:** A before hook of the app threw `hookRefusal(message)`. The body carries `message`. With `hooks.request.before`, each route can answer it.
 - **Do:** Show `message` to the person.
 
 | Routes |
@@ -336,7 +336,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="hook_failed"><code>hook_failed</code> 500</h3>
 
-- **Meaning:** A before hook threw another error, a session patch was wrong, or `jwtMint.claims` failed.
+- **Meaning:** A before hook threw another error, a session patch was wrong, or `jwtMint.claims` failed. With `hooks.request.before`, each route can answer it.
 - **Do:** Read the log line of the hook, and fix the hook.
 
 | Routes |

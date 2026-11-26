@@ -35,6 +35,8 @@ import {
   type OperatorHooks,
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
+  REQUEST_HOOK_POINTS,
+  type RequestHooks,
   type ResolvedHooks,
   SCIM_HOOK_POINTS,
   type ScimHooks,
@@ -3846,6 +3848,7 @@ const HOOK_GROUPS: readonly string[] = [
   "sso",
   "scim",
   "anonymous",
+  "request",
 ];
 
 function resolveHooks(
@@ -3866,12 +3869,13 @@ function resolveHooks(
       sso: {},
       scim: {},
       anonymous: {},
+      request: {},
     };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, scim, and anonymous`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, scim, anonymous, and request`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -3919,7 +3923,13 @@ function resolveHooks(
   // Only the upgrade of an anonymous session runs these points (plan 12i Task 7).
   if (Object.keys(anonymous).length > 0 && !anonymousOn)
     throw new ConfigError("hooks.anonymous needs anonymous: the hooks would never run");
-  return { organization, session, user, identity, operator, sso, scim, anonymous };
+  // The request points run in `handle` for each matched route, so they need no feature.
+  const request = hookGroup(
+    "hooks.request",
+    input.request,
+    REQUEST_HOOK_POINTS,
+  ) as unknown as RequestHooks;
+  return { organization, session, user, identity, operator, sso, scim, anonymous, request };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

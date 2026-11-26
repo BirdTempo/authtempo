@@ -45,6 +45,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `hooks.sso` | `beforeSignIn` |
 | `hooks.scim` | `afterChange` |
 | `hooks.anonymous` | `beforeLink`, `afterLink` |
+| `hooks.request` | `before`, `after` |
 | `via` of a member | `create`, `add`, `invitation`, `operator`, `sso`, `scim`; for a removal `remove`, `leave`, `operator`, or `scim` |
 | `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso`, `phone`, `anonymous`, `invite` |
 | `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, `operator` for `createAdmin`, or `scim` for a create by the directory |
@@ -94,6 +95,24 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 - `hooks.sso` needs `sso`.
 - `beforeSignIn` gets the connection, the profile from the provider, and the user that the sign-in answers. The user is null when the sign-in creates the user.
 - It runs in the sign-in's transaction, before its first write. A refusal answers `hook_refused`, and the sign-in writes nothing.
+
+## The request points
+
+- `hooks.request` needs no feature. `before` and `after` run in `handle`, around the handler of each matched route.
+- They run after each rule of the router: the host rule, the Origin rule, and the impersonation and anonymous refusals. A request that the router refused runs no hook.
+- An in-process call of `auth.api` runs neither point.
+- Each point gets `route`, `params`, `url`, `headers`, `ip`, and `json()`. `route` is the route key, such as `POST /magic-link/request`.
+- `json()` answers the JSON body, read through the cap of the route. The handler then reads the same bytes.
+- `json()` answers `undefined` for a body that is not JSON. It answers the same on the SCIM routes, on the SAML ACS, and on the two SSO connection writes. These routes read their body with a cap of their own.
+- A `hookRefusal` in `before` answers 403 `hook_refused` with the message, and the handler does not run. Any other throw answers 500 `hook_failed` and writes one line.
+- `after` also gets `status` and `code`. It cannot change the answer. A throw in it writes one line, and the answer stays.
+- Each value is new for the hook. A change of the headers, the URL, or the body changes nothing of the request.
+
+:::caution
+Warning: the body of a sign-in holds a password or a code. Do not write the value of `json()` to a log.
+:::
+
+A request hook never widens a rule or a limit of core. Use it to refuse a request for a reason of your app.
 
 ## The operator hook points
 
