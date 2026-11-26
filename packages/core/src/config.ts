@@ -83,6 +83,8 @@ import { ROUTES } from "./http/route-list.js";
 import type { SetupPageInput } from "./http/setup-page.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
+import type { ResolvedLimitsConfig } from "./limiter/limit-window.js";
+import { type LimitsConfig, resolveLimitsConfig } from "./limiter/limits-config.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort, LimitWindow } from "./limiter/port.js";
 import { type ResolvedObserve, resolveObserve } from "./observe/config.js";
@@ -466,8 +468,12 @@ export interface AuthConfig {
   /**
    * The TOTP second factor (plan 9f, spec 8.11). On by default when
    * `password` is set: a user turns it on for their own account. `false`
-   * removes the routes and `api.totp`. Without `password` there is no
-   * factor, because the gate covers the password sign-in only.
+   * removes the routes and `api.totp`. Without `password` the factor is off
+   * by default. Set `totp` to turn it on there: the gate covers the magic
+   * link, the email code, and social (plan 12c), and the setup takes an
+   * email code as its proof, so the deployment needs `emailOtp`. A config
+   * with `totp` and neither `password` nor `emailOtp` is refused: a session
+   * alone must not set up the factor.
    */
   totp?: TotpConfig | false;
   /**
@@ -563,6 +569,13 @@ export interface AuthConfig {
    * cookie, and `POST /sign-out` ends every session of the browser.
    */
   multiSession?: MultiSessionConfig | false;
+  /**
+   * The limits of the deployment. `windows` changes the window of a limit
+   * family, and `noClientIp` decides what a request with no client IP does.
+   * Off when absent: each family keeps the window of the limits page, and
+   * each request with no client IP shares the one count `unknown`.
+   */
+  limits?: LimitsConfig;
 }
 
 /** Multi-session (plan 12i). A bearer client has no bag. */
@@ -1437,6 +1450,8 @@ export interface ResolvedConfig {
   storage: StorageAdapter;
   mail: MailPort;
   limiter: LimiterPort;
+  /** The windows that the config changed, and the rule of a request with no client IP. */
+  limits: ResolvedLimitsConfig;
   clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
@@ -2026,6 +2041,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       `cookieName must not be ${SIGN_UP_PROOF_COOKIE}: it is the sign-up proof cookie of core`,
     );
   const jwtMint = resolveJwtMint(input.jwtMint, baseURL);
+  // Before `totp`: with no password, the TOTP setup needs the email code as its proof.
+  const emailOtp = resolveEmailOtp(input.emailOtp);
   // A default audience follows the picked entry, so a session JWT of each entry has its own (plan 12i Task 18).
   const baseDefaults: BaseDefaults = {
     appURL: input.appURL === undefined,
@@ -2053,6 +2070,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     storage: input.storage,
     mail: input.mail,
     limiter: input.limiter ?? createMemoryLimiter(clock),
+    limits: resolveLimitsConfig(input.limits),
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,
@@ -2077,9 +2095,14 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     tokens: resolveTokens(input.tokens),
     signUp,
     password,
-    emailOtp: resolveEmailOtp(input.emailOtp),
+    emailOtp,
     phone: resolvePhone(input.phone, input.limiter),
-    totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
+    totp: resolveTotp(
+      input.totp,
+      { password: password !== null, emailOtp: emailOtp !== null },
+      input.appName ?? origin.hostname,
+      cookieName,
+    ),
     jwtMint,
     // Every audience that a session JWT of any entry can hold: an access token must hold none.
     oauth: resolveOAuth(
@@ -2958,22 +2981,28 @@ function resolveGate(input: unknown): ResolvedTotp["gate"] {
 }
 const COOKIE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
-/** `totp` (plan 9f). Absent: on with the defaults when `password` is set. `false`: off. */
+/**
+ * `totp` (plan 9f). Absent: on with the defaults when `password` is set.
+ * `false`: off. Without `password`, an absent `totp` stays off, so no
+ * deployment gets the factor by an upgrade. A set `totp` then needs
+ * `emailOtp`: the setup proves the person with the password or with an email
+ * code, and a deployment with neither has no proof.
+ */
 function resolveTotp(
   input: TotpConfig | false | undefined,
-  hasPassword: boolean,
+  proofs: { password: boolean; emailOtp: boolean },
   defaultIssuer: string,
   cookieName: string,
 ): ResolvedTotp | null {
   if (input === false) return null;
   if (input !== undefined && !isPlainObject(input))
     throw new ConfigError("totp must be an object or false");
-  if (!hasPassword) {
-    if (input !== undefined)
+  if (!proofs.password) {
+    if (input === undefined) return null;
+    if (!proofs.emailOtp)
       throw new ConfigError(
-        "totp needs a password config: the enable of each method proves the password",
+        "totp needs password or emailOtp: the setup proves the person with the password or with an email code, and a session alone must not set up the factor",
       );
-    return null;
   }
   const o: TotpConfig = input ?? {};
   for (const [key, value] of Object.entries(o))

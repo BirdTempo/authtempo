@@ -10,6 +10,7 @@ import {
   endOtherAccess,
   listSessions,
   REVOKE_PER_USER,
+  revokeAllSessions,
   revokeOtherSessions,
   revokeSession,
   SESSION_LIST_MAX,
@@ -733,6 +734,92 @@ describe("the revoke of the other sessions (plan 12a)", () => {
   });
 });
 
+describe("the revoke of all sessions", () => {
+  it("ends every session, the caller's too, the challenges, and the handoff codes, and keeps the trusted devices, the API tokens, and the OAuth tokens", async () => {
+    const { auth, me, other, ended, access } = await stocked();
+    expect(await revokeAllSessions(auth.config, { session: me })).toEqual({
+      ok: true,
+      value: { ended: 2 },
+    });
+    expect([...ended].sort()).toEqual([`${me.session.id}:revoked`, `${other.id}:revoked`].sort());
+    expect(await access()).toEqual({
+      sessions: [],
+      challenges: 0,
+      handoffCodes: 0,
+      oauthCodes: 2,
+      refreshTokens: 1,
+      trustedDevices: 1,
+      apiTokens: 1,
+    });
+    expect(await resolveSession(auth.config, me.token)).toBeNull();
+  });
+
+  it("refuses a stale session and ends nothing", async () => {
+    const auth = totpAuth();
+    const signedIn = await verifiedSession(auth);
+    const other = await verifiedSession(auth, EMAIL, "2.2.2.2");
+    const old = await stale(auth, signedIn.token);
+    expect(await revokeAllSessions(auth.config, { session: old })).toMatchObject({
+      ok: false,
+      code: "session_not_fresh",
+    });
+    expect(await resolveSession(auth.config, signedIn.token)).not.toBeNull();
+    expect(await resolveSession(auth.config, other.token)).not.toBeNull();
+  });
+
+  it("shares the limit key of the other revoke routes", async () => {
+    const auth = totpAuth();
+    const user = await auth.seedUser("all-limit@example.com");
+    const me = await open(auth, user.id, "1.1.1.1");
+    for (let i = 0; i < REVOKE_PER_USER.max; i++)
+      expect((await revokeOtherSessions(auth.config, { session: me })).ok).toBe(true);
+    expect(await revokeAllSessions(auth.config, { session: me })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+    expect(await resolveSession(auth.config, me.token)).not.toBeNull();
+  });
+
+  it("answers the count on the route, clears the cookie, and ends a bearer session too", async () => {
+    const auth = totpAuth();
+    const user = await auth.seedUser("all-route@example.com");
+    const other = await open(auth, user.id, "1.1.1.1");
+    const me = await open(auth, user.id, "2.2.2.2");
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const res = await handle(
+      post("/auth/sessions/revoke-all", {}, { cookie: `${auth.config.cookieName}=${me.token}` }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ended: 2 });
+    // The cleared cookie: the name with no value, and an age of zero.
+    expect(res.headers.getSetCookie().join("\n")).toMatch(
+      new RegExp(`${auth.config.cookieName}=;[^\\n]*Max-Age=0`),
+    );
+    expect(await resolveSession(auth.config, me.token)).toBeNull();
+    expect(await resolveSession(auth.config, other.token)).toBeNull();
+    expect(await ids(auth, user.id)).toEqual([]);
+    // The ended token is no session: the next call answers 401.
+    const again = await handle(
+      post("/auth/sessions/revoke-all", {}, { authorization: `Bearer ${me.token}` }),
+    );
+    expect(again.status).toBe(401);
+    expect(await again.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("keeps the sessions of another user", async () => {
+    const auth = totpAuth();
+    const ada = await auth.seedUser("all-ada@example.com");
+    const bob = await auth.seedUser("all-bob@example.com");
+    const mine = await open(auth, ada.id, "1.1.1.1");
+    const theirs = await open(auth, bob.id, "2.2.2.2");
+    expect(await revokeAllSessions(auth.config, { session: mine })).toEqual({
+      ok: true,
+      value: { ended: 1 },
+    });
+    expect(await ids(auth, bob.id)).toEqual([theirs.session.id]);
+  });
+});
+
 describe("the renewed cookie of the revoke routes (plan 12a)", () => {
   it("sends the renewed cookie on the two revoke routes", async () => {
     const auth = totpAuth();
@@ -756,7 +843,7 @@ describe("the renewed cookie of the revoke routes (plan 12a)", () => {
 });
 
 describe("api.session (plan 12a)", () => {
-  it("serves list, revoke, and revokeOthers on the engine calls", async () => {
+  it("serves list, revoke, revokeOthers, and revokeAll on the engine calls", async () => {
     const base = makeAuth();
     const input: AuthConfig = {
       baseURL: BASE_URL,
@@ -798,6 +885,11 @@ describe("api.session (plan 12a)", () => {
       value: { ended: 1 },
     });
     expect(await ids({ ...base, config }, user.id)).toEqual([c.session.id]);
+    expect(await api.session.revokeAll({ session: c })).toEqual({
+      ok: true,
+      value: { ended: 1 },
+    });
+    expect(await ids({ ...base, config }, user.id)).toEqual([]);
   });
 });
 

@@ -69,7 +69,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
 | POST | `/tokens/update` | session (fresh), `{ id, name?, permissions?, expiresAt? }` | the `apiToken` after the change; it narrows only: 400 `invalid_body` for a wider set, `null` over a set, a later expiry, `null` over a date, or another key; 401; 403 `email_unverified`, `session_not_fresh`; 404 `not_found` for another user's token; 409 `conflict` when the row changed between the read and the write |
 | GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`, and one call of the quota spent; 401 for a session cookie, a `ts_` bearer, or no credential, and `token_retired` for a key of `tokens.movedPrefixes` with no row; 429 `rate_limited` over the token's window, `token_exhausted` at a quota of zero; 409 `conflict` when a lost spend sees no other spend, or after 20 lost spends |
-| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; `backupCodes` is empty when another method is on, because the factor keeps its list (plan 12c); 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (`totp-setup:user`, 5 per 15 minutes); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
+| POST | `/totp/setup` | session, `{ password }` or `{ emailCode }` (a code of `POST /reauth/email`) | `{ secret, uri, backupCodes }`, each answered once; `backupCodes` is empty when another method is on, because the factor keeps its list (plan 12c); 400 `invalid_body` (no proof, or two), `invalid_code` (a wrong, spent, or expired email code; no row is written), `too_many_attempts` (the guesses of the code are spent); 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 404 for a proof that the deployment lacks (`password` with no `password` config, `emailCode` with `emailOtp: false`); 429 `rate_limited` (`totp-setup:user`, 5 per 15 minutes, and the verify limits of a mailed code); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `totp`: on by default with `password`, and set by the app with no `password` |
 | POST | `/totp/enable` | session (fresh), `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`, as `GET /totp`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, one older than 15 minutes, or a setup whose codes another method made stale: set up again); 401; 403 `email_unverified`, `session_not_fresh`; 409 `totp_enabled`, `conflict` (a parallel first enable of another method: retry); 429 `rate_limited`. As the first method, it ends every other session of the user with `two_factor` |
 | POST | `/totp/disable` | session (fresh), `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; it turns the TOTP method off, and with no method left the factor is off; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 403 `session_not_fresh`; 409 `conflict`; 429 `rate_limited` |
 | POST | `/totp/backup-codes` | session (fresh), `{ code }` | `{ backupCodes }`, a new list; the old codes stop working; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 403 `session_not_fresh`; 409 `conflict` (parallel writes won every try); 429 `rate_limited` |
@@ -828,6 +828,8 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 
 The second factor (plan 9f, plan 12c) is on when `password` is set. Its config key is `totp`, and `totp: false` turns it off. A user turns on one or more methods for their own account. The first step of each method proves the password, because a session alone must not turn the factor on: a person with a stolen session could enroll their own method, and the enable then ends the owner's other sessions. A wrong password answers `invalid_credentials` and writes no row.
 
+A deployment with no `password` has no factor by default. Set `totp: {}` to turn TOTP on there. The gate then covers the magic link, the email code, and social. The TOTP setup takes an email code in place of the password: `POST /reauth/email` mails the code, and `POST /totp/setup` takes `{ emailCode }`. So the config needs `emailOtp`, and `totp` with neither `password` nor `emailOtp` is refused at start. The rule stays: a session alone sets up no factor, because the thief of a session does not read the owner's mailbox. A person who reads the mailbox can reset the password, so the email code gives no more than the password gives. A deployment with a password takes either proof. The passkey method and the email method still take the password, so they answer 404 with no `password`.
+
 | Method | Turn it on | Pass a challenge with |
 | --- | --- | --- |
 | `totp` | `POST /totp/setup` with the password answers the secret and the `otpauth://` URI for a QR code, once; then `POST /totp/enable` with a current code within 15 minutes | `code` |
@@ -858,7 +860,7 @@ The limits of the second factor, in the same limiter as the other routes:
 | `totp-verify:ip:<ip>` | 15 minutes | 30 | The verify and the challenge page POST |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every code check, as above |
-| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of the passkey and the email enable, and of `POST /second-factor/disable` |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The proof of the TOTP setup (the password or the email code), and the password check of the passkey and the email enable and of `POST /second-factor/disable` |
 | `second-factor-passkey:ip:<ip>` | 15 minutes | 30 | The passkey options of a challenge |
 | `second-factor-email:user:<userId>` | 15 minutes | 5 | The email code sends |
 | `totp:email-day:<email>` | 24 hours | 20 | The email code sends of the second factor |
@@ -877,7 +879,7 @@ There is no per-account lockout. The sign-in's 10 per address and the 5 codes pe
 
 The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once.
 
-- `api.totp` holds the TOTP operations in process. `api.totp.setup({ session, password, ip })` takes the session and the password, as the route does; `ip` is not read since plan 9h. Pass the answer of `api.getSession` or `auth.session`. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+- `api.totp` holds the TOTP operations in process. `api.totp.setup({ session, password })` or `api.totp.setup({ session, emailCode, ip })` takes the session and one proof, as the route does; `ip` counts on the verify limit of the email code, and the password proof does not read it. Pass the answer of `api.getSession` or `auth.session`. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
 - The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. A default that holds a colon (an IPv6 `baseURL` such as `http://[::1]:8787`, or an `appName` such as "Acme: Notes") stops `createAuth` with a message that names `totp.issuer`: the key URI uses the colon to split the issuer from the account. Set `totp.issuer`, or `totp: false`.
 
 ## JWT minting
@@ -1213,6 +1215,7 @@ Some in-process calls apply no fresh rule. `api.tokens.create` and `api.passkeyR
 | GET | `/sessions` | session | `{ sessions: [{ id, createdAt, lastSeenAt, expiresAt, freshAt, ip, userAgent, activeOrganizationId, current }] }`, the live sessions newest first, at most 100, never a token or its hash; 401. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
 | POST | `/sessions/revoke` | session (fresh), `{ id }` | `{ ok: true, current }`; `current` is true for the caller's own id, which also clears the cookie; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found` (another user's, an unknown, or an ended id); 429 `rate_limited`. A session JWT of that session lives to its `exp` |
 | POST | `/sessions/revoke-others` | session (fresh) | `{ ended }`, the count of live sessions it ended: every other session, the second-factor challenges, and the handoff codes go. An ended row goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited` |
+| POST | `/sessions/revoke-all` | session (fresh) | `{ ended }`, the count of live sessions it ended, with the caller's own: every session, the second-factor challenges, and the handoff codes go in one transaction, and the answer clears the cookie. An ended row goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited`. A session JWT of an ended session lives to its `exp` |
 | POST | `/user/update` | session, `{ name?, image? }` | `{ user }`. `name`: a name by the name rule below, or null. `image`: an image URL by the image rule below, or null. 400 `invalid_body` (no field, a bad value, or any other field, the address too); 401 (also when the user row goes during the update); 403 `email_unverified`, `hook_refused`; 409 `conflict`; 429 `rate_limited`; 500 `hook_failed`. No fresh rule |
 | POST | `/user/change-email` | session (fresh), `{ newEmail, method?, next? }` | `{ sent: true }`. `method` is `link` (default) or `code` (needs `emailOtp`). A proof goes to the new address. When any user holds it, a note goes there in place of the proof, with the same answer. 400 `invalid_body` (a malformed address, the same address, or any other field); 401; 403 `email_unverified`, `session_not_fresh`; 404 `not_found` (`code` with `emailOtp: false`); 429 `rate_limited` |
 | GET | `/user/change-email/confirm` | `?token=` | 200 HTML confirm page (`account.confirmPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No storage read, no limit, no cookie |
@@ -1233,7 +1236,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 | `passkey-sign-up:ip:<ip>` | 1 hour | 10 | `POST /passkey/sign-up/options` (plan 12i Task 8), after the name rule and the sign-up rule. A refused body counts no try |
-| `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
+| `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke`, `POST /sessions/revoke-others`, and `POST /sessions/revoke-all` together |
 | `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
 | `passkey-rename:user:<userId>` | 15 minutes | 30 | `POST /passkeys/rename`, also for an unknown id or another user's id. A refused name counts no try |
 | `email-change:user:<userId>` | 1 hour | 5 | `POST /user/change-email`. A refused body, a stale session, and an unverified user count no try |
@@ -1846,6 +1849,15 @@ writes each value under version 1.
   isolate.
 - A request with no client IP counts against one shared IP bucket. A host
   that sets no `cf-connecting-ip` shares one budget across all callers.
+  `limits.noClientIp: "refuse"` ends the shared bucket: `handle` then
+  answers 403 `client_ip_missing` to a request with no client IP, before
+  any route. An in-process call of `auth.api` with `ip: null` throws at its
+  first per-IP limit.
+- Each limit has a fixed window. `limits.windows` gives a limit family
+  another window, such as `"otp:email": { max: 5 }`. A higher `max` lets a
+  caller try more, so the defaults are the reviewed numbers. Core refuses
+  a family that it does not know, and the six families whose window comes
+  from another setting (`LIMITS_FROM_SETTINGS`).
 - Off Workers, a caller can set `cf-connecting-ip` and rotate it past the
   per-IP limit. Pass a `clientIp` function that reads the header your
   trusted proxy sets.

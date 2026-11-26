@@ -761,8 +761,10 @@ describe("totp (plan 9f)", () => {
     ];
     for (const [totp, message] of bad)
       expect(() => resolveConfig({ ...pw, totp: totp as never })).toThrowError(message);
-    expect(() => resolveConfig({ ...base, totp: {} })).toThrowError(
-      "totp needs a password config: the enable of each method proves the password",
+    // With no password, a set totp needs the email code as the proof of its setup.
+    // totp-setup-email-code.test.ts holds the cases that resolve.
+    expect(() => resolveConfig({ ...base, totp: {}, emailOtp: false })).toThrowError(
+      "totp needs password or emailOtp: the setup proves the person with the password or with an email code, and a session alone must not set up the factor",
     );
   });
 

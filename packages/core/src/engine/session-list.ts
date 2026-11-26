@@ -145,8 +145,8 @@ export async function deleteHandoffCodes(tx: StorageAdapter, userId: string): Pr
  * The one list of deletes of a session end (plan 12f deviation 6): the
  * challenges, the sessions that `sessionWhere` matches, then the handoff
  * codes. The challenges go first because a verify spends its challenge as
- * its last statement (plan 9f). `endOtherSessions` and `endAllAccess` both
- * call it, so the two lists cannot drift. `sessionWhere` holds the
+ * its last statement (plan 9f). `endOtherSessions`, `endAllAccess`, and
+ * `revokeAllSessions` call it, so the lists cannot drift. `sessionWhere` holds the
  * `userId` term. The answer is the count of sessions that the call deleted.
  */
 async function endAccess(
@@ -266,6 +266,44 @@ export async function revokeOtherSessions(
     // `endSessions` below: an expiry ends a session too (ruling 49).
     await deleteEndedSessions(tx, config, user.id, now);
     return endOtherSessions(tx, user.id, session.id, ended ?? null, now, stops);
+  });
+  await sessionsEnded(config, ended, "revoked", stops, n);
+  await deliverLogouts(config, user.id);
+  return ok({ ended: n });
+}
+
+/**
+ * Ends every session of the user, the caller's own too, in one transaction.
+ * It is `revokeOtherSessions` with no session kept: the same fresh rule, the
+ * same limit key, the same deletes through `endAccess`, and the same events.
+ * The trusted devices, the API tokens, and the OAuth grants stay, as there.
+ * One transaction is the reason for the call: `revokeOtherSessions` and then
+ * `revokeSession` of the caller leave the caller's session live when the
+ * second call fails. The answer counts the caller's session. The route
+ * clears the cookie.
+ */
+export async function revokeAllSessions(
+  config: ResolvedConfig,
+  input: { session: ResolvedSession },
+): Promise<Result<{ ended: number }>> {
+  const fresh = requireFresh(config, input.session.session);
+  if (!fresh.ok) return fresh;
+  const { user } = input.session;
+  if (!(await revokeAllowed(config, user.id))) return fail("rate_limited");
+  const ended = endedList(config);
+  const stops = impersonationStops(config, "user_end");
+  const now = config.clock.now();
+  const n = await config.storage.transaction(async (tx) => {
+    // An ended row goes with no hook, as in `revokeOtherSessions` (ruling 49).
+    await deleteEndedSessions(tx, config, user.id, now);
+    return endAccess(
+      tx,
+      user.id,
+      [{ field: "userId", op: "eq", value: user.id }],
+      ended ?? null,
+      now,
+      stops,
+    );
   });
   await sessionsEnded(config, ended, "revoked", stops, n);
   await deliverLogouts(config, user.id);

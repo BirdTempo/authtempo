@@ -22,6 +22,7 @@ sources:
 
 - A route that a config key turns off answers 404 `not_found`.
 - With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.
+- With `limits.noClientIp` set to `refuse`, a request with no client IP answers 403 `client_ip_missing` before any route.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
 - A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`. So does the `conflict` of a sign-up confirm that lost its claim.
 - A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 4194304 bytes for `POST /sso/setup/connection`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
@@ -122,6 +123,15 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh |
 | Input | None |
 | Answer | `{ ended }`, the count of live sessions that the call ended. Every other session, the second-factor challenges, and the handoff codes go. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-sessions-revoke-all"><code>POST /sessions/revoke-all</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh |
+| Input | None |
+| Answer | `{ ended }`, the count of live sessions that the call ended, with the caller's own. Every session, the second-factor challenges, and the handoff codes go in one transaction, and the answer clears the session cookie. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay. A session JWT of an ended session lives to its `exp` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-user-update"><code>POST /user/update</code></h3>
@@ -508,9 +518,9 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
-| Input | JSON `{ password }` |
+| Input | JSON `{ password?, emailCode? }`. Exactly one proof: `{ password }`, or `{ emailCode }` with a code of [`POST /reauth/email`](#post-reauth-email) |
 | Answer | `{ secret, uri, backupCodes }`, each answered once. `backupCodes` is empty when another method is on, because the factor keeps its list |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-totp-enable"><code>POST /totp/enable</code></h3>
 

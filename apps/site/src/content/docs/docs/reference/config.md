@@ -35,6 +35,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `mail` | `MailPort` | required | `{ send(message) }`. Core calls it once per mail. |
 | `limiter` | `LimiterPort` | the memory limiter | The memory limiter counts per isolate and is for tests. Use the owned limiter of the adapter. |
 | `clientIp` | function of the request | reads `cf-connecting-ip` | Answers the client IP, or null. Off Workers, read the header of your trusted proxy. |
+| `limits` | object | no change | Changes the window of a limit, and decides what a request with no client IP does. See the keys under Limits. |
 | `clock` | `Clock` | the system clock | `{ now(): Date }`. Tests inject one. |
 | `cookieName` | string | `"__Host-tempo_session"` | The session cookie. The binding cookie drops a `__Host-` or `__Secure-` prefix, takes `__Secure-`, and adds `_oauth`. With the default name, core moves the old `tempo_session` cookie for one release. |
 | `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
@@ -50,7 +51,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
 | `phone` | object or `false` | off | The phone code by SMS. An object needs `sms` and `regions`, and a limiter whose `scope` is `"shared"`. |
-| `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
+| `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. Without `password`, set an object to turn the factor on: the setup then takes an email code. An object with neither `password` nor `emailOtp` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. Set `operator.secretHash` or `operator.secrets`, not both. |
@@ -462,6 +463,13 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | --- | --- | --- | --- |
 | `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A request with the Bearer scheme has no bag; HTTP Basic does not count. A bag session never slides its expiry, so an idle one ends at its ttl. When the active session ends elsewhere, the bag stays out of reach until a new sign-in. An anonymous sign-in needs no credential and makes it reachable again, so on a shared computer use `POST /sign-out`. A SCIM-revoked session holds its bag place until the next list or switch. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
 | `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the session of the bag that the browser used least recently, never the active one. |
+
+## Limits
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `limits.noClientIp` | `"shared"` or `"refuse"` | `"shared"` | What core does with a request for which `clientIp` gives null. With `"shared"`, each per-IP limit counts it on the one key `unknown`. With `"refuse"`, `handle` answers 403 `client_ip_missing` before any route. An in-process call of `auth.api` with `ip: null` then throws at its first per-IP limit. Another value is refused. [A request with no client IP](/docs/reference/limits/#a-request-with-no-client-ip). |
+| `limits.windows` | object | no change | The window of a limit family, by the family, such as `"otp:email": { max: 5 }`. `max` is a whole number from 1 to 100000. `seconds` is a whole number from 1 to 86400, and its default is the length of the family's own window. Core refuses a family that it does not know, and a family whose window comes from another setting. [Change a limit](/docs/reference/limits/#change-a-limit). |
 
 ## Observability
 

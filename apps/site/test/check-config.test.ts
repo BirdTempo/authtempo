@@ -10,7 +10,7 @@ const table = (keys: string[]) =>
  * read it, so the title cannot drift from the pin (plan 12n). The comments in
  * that test name the keys of each addend.
  */
-const KEYS = 255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3 + 3 + 1 + 3 + 1;
+const KEYS = 255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3 + 3 + 1 + 3 + 3 + 1;
 
 describe("checkConfig", () => {
   it(`lists ${KEYS} keys, the nested ones by their path`, () => {
@@ -58,6 +58,7 @@ describe("checkConfig", () => {
     // Plan 12f2 Task 3 adds operator.invite, operator.invite.ttlHours, and totp.gate.invite.
     // Plan 12q Task 2 adds session.maxPerUser.
     // Plan 13a Task 0 adds sso.setup, sso.setup.ttlHours, and sso.setup.page.
+    // The limits block of 2026-11-25 adds limits, limits.noClientIp, and limits.windows.
     // The request hook of 2026-11-25 adds hooks.request.
     expect(keys.length).toBe(KEYS);
     expect(keys).toContain("session.maxPerUser");

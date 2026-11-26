@@ -344,6 +344,13 @@ export { renderSetupPage } from "./http/setup-page.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 export { ipKey, isIpLiteral } from "./limiter/ip-key.js";
+export {
+  LIMIT_OVERRIDE_CALLS_MAX,
+  LIMIT_OVERRIDE_SECONDS_MAX,
+  LIMITS_FROM_SETTINGS,
+  type LimitOverride,
+  type LimitsConfig,
+} from "./limiter/limits-config.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export type {

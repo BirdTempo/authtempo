@@ -48,8 +48,21 @@ export interface HostedModel {
   read: string;
 }
 
-/** The day of the review: every Better Auth cell comes from it. */
+/**
+ * The day of the review. Each Better Auth cell came from it, and so did each
+ * authtempo cell of a `row()`. A row keeps this day while one of its cells
+ * is that old: a row is as old as its older cell.
+ */
 const REVIEW_READ = "2026-10-14";
+/**
+ * The version of Better Auth that each Better Auth cell holds for, and the
+ * day of that read. On that day each cell was read again in the packages of
+ * this version on npm and in the docs. 70 cells held, and 4 changed: d5, g7,
+ * g10, and g14. check-facts holds each npm source and the text of the page
+ * to these two values.
+ */
+export const BETTER_AUTH_VERSION = "1.7.27";
+export const BETTER_AUTH_READ = "2026-11-25";
 /** The day of the fresh read of the merged plans 11g, 12a, 12b, and 12c, and of the guides. */
 const CODE_READ = "2026-10-19";
 
@@ -57,8 +70,11 @@ const CODE_READ = "2026-10-19";
 export const BETTER_AUTH_DOCS_BASE = "https://better-auth.com/docs/";
 /** A docs page of Better Auth: its path must be a member of BETTER_AUTH_DOCS (re-review R6). */
 const doc = (path: BetterAuthDoc) => `${BETTER_AUTH_DOCS_BASE}${path}`;
-/** The package that the review read in code, at its version. */
-const NPM = "npm better-auth@1.7.2,";
+/** The package that the read of BETTER_AUTH_READ read in code, at its version. */
+const NPM = `npm better-auth@${BETTER_AUTH_VERSION},`;
+/** Another package of Better Auth at the same version: `auth` is its CLI, and `@better-auth/core` its core. */
+const npm = (name: "auth" | "@better-auth/core", file: string) =>
+  `npm ${name}@${BETTER_AUTH_VERSION}, ${file}`;
 /** The releases of Better Auth on GitHub. */
 const RELEASES = "https://github.com/better-auth/better-auth/releases";
 
@@ -122,14 +138,15 @@ const SOURCES: Readonly<Record<string, readonly string[]>> = {
   b41: [doc("concepts/users-accounts"), doc("concepts/session-management")],
   d1: [doc("concepts/cli")],
   d4: [doc("plugins/admin")],
-  d5: [doc("concepts/cli")],
+  // The docs page concepts/cli still names Next.js and SQLite only. The code of the CLI has the lists.
+  d5: [npm("auth", "dist/index.mjs")],
   d6: [doc("concepts/cli")],
   d11: [doc("concepts/cli")],
   d12: [doc("plugins/jwt")],
   e1: [doc("plugins/open-api")],
   e7: [doc("reference/errors")],
   e10: [doc("guides/1-7-upgrade-guide")],
-  f2: [doc("reference/security"), `${NPM} dist/context/secret-utils.mjs`],
+  f2: [doc("reference/security"), `${NPM} dist/context/create-context.mjs`],
   f3: [doc("reference/security")],
   f4: [doc("reference/options")],
   f6: [doc("concepts/cookies")],
@@ -148,7 +165,10 @@ const SOURCES: Readonly<Record<string, readonly string[]>> = {
   g10: [RELEASES],
   g11: [RELEASES],
   // The review did not read Better Auth for this row; the authtempo cell comes from this proof.
-  g14: ["examples/worker/proof/bundle-no-node.mjs"],
+  g14: [
+    "examples/worker/proof/bundle-no-node.mjs",
+    npm("@better-auth/core", "dist/async_hooks/index.mjs"),
+  ],
 };
 
 /** The public source of the Better Auth cell of a row. */
@@ -167,6 +187,44 @@ const P12B = "packages/core/src/secrets-entry.ts";
 const P12C = "packages/core/src/engine/second-factor.ts";
 const P12E = "packages/core/src/engine/oauth-token.ts";
 const P12I = "packages/core/src/engine/phone.ts";
+
+/**
+ * The file of this repository that holds the authtempo cell of a row that
+ * the read of 2026-11-25 moved. Plans 12d to 12k and the CLI plans shipped
+ * these features after the read of 2026-10-19, and the rows still denied
+ * them. check-compare now holds each such denial to the code.
+ */
+const CODE = {
+  access: "packages/core/src/access.ts",
+  anonymous: "packages/core/src/engine/anonymous.ts",
+  config: "packages/core/src/config.ts",
+  createAdmin: "packages/cli/src/commands/create-admin.ts",
+  generate: "packages/cli/src/commands/generate.ts",
+  idToken: "packages/core/src/engine/id-token.ts",
+  impersonation: "packages/core/src/engine/operator/impersonation.ts",
+  lastMethod: "packages/core/src/engine/last-method.ts",
+  multiSession: "packages/core/src/engine/multi-session.ts",
+  mysql: "packages/adapter-mysql/src/index.ts",
+  operatorSessions: "packages/core/src/engine/operator/sessions.ts",
+  operatorUsers: "packages/core/src/engine/operator/users.ts",
+  organizationTokens: "packages/core/src/engine/organization-tokens.ts",
+  otlp: "packages/observe/src/otlp.ts",
+  passkeyExtensions: "packages/core/src/engine/passkey-extensions.ts",
+  passkeys: "packages/core/src/engine/passkeys.ts",
+  password: "packages/core/src/engine/password.ts",
+  postgresMigrations: "packages/adapter-postgres/src/migrations.ts",
+  roles: "packages/core/src/engine/roles.ts",
+  scim: "packages/core/src/engine/scim/users.ts",
+  securityPolicy: "SECURITY.md",
+  sessionList: "packages/core/src/engine/session-list.ts",
+  sqlite: "packages/adapter-sqlite/src/index.ts",
+  sso: "packages/core/src/engine/sso/connections.ts",
+  teams: "packages/core/src/engine/teams.ts",
+  tokens: "packages/core/src/engine/tokens.ts",
+  upgrade: "packages/cli/src/commands/upgrade.ts",
+  username: "packages/core/src/engine/username.ts",
+  webauthn: "packages/client/src/webauthn.ts",
+} as const;
 
 /** A row of the review as it stands, read on the day of the review. */
 function row(
@@ -262,7 +320,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "authtempo",
     "Workers with no Node compatibility",
     "Every Worker sets no_nodejs_compat, and a bundle proof fails on any node: import.",
-    "Not checked in the review.",
+    "Loads AsyncLocalStorage from node:async_hooks. With none, it warns that some features may not work.",
   ),
   row(
     "a26",
@@ -278,6 +336,14 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "session.absoluteDays ends a session after a fixed number of days, whatever its sliding refresh.",
     "No cap in the docs that the review read.",
     [P12B],
+  ),
+  moved(
+    "a27",
+    "authtempo",
+    "WebAuthn Level 3",
+    "Autofill, passkey-first sign-up, the PRF, largeBlob, and credProps extensions, related origins, hints, and the Signal API.",
+    "Autofill, the PRF, largeBlob, and credProps extensions, and passkey-first sign-up.",
+    [P11D, CODE.passkeyExtensions, CODE.webauthn],
   ),
 
   // Where both do the same.
@@ -468,6 +534,190 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "A device authorization plugin.",
     [P12E],
   ),
+  moved(
+    "a28",
+    "parity",
+    "SCIM 2.0",
+    "Users, Groups, and Bulk for each organization, with a SCIM token. scim turns it on.",
+    "Users and Groups through @better-auth/scim.",
+    [CODE.scim],
+  ),
+  moved(
+    "a29",
+    "parity",
+    "SAML 2.0 and SSO",
+    "SAML 2.0 and OIDC SSO for each organization, with verified domains. sso turns it on.",
+    "SAML 2.0 and OIDC SSO for each organization, through @better-auth/sso.",
+    [CODE.sso],
+  ),
+  moved(
+    "b4",
+    "parity",
+    "Passkeys",
+    "Passkeys with user verification, autofill, and passkey-first sign-up, which passkey.signUp turns on.",
+    "The passkey plugin, with passkey-first sign-up.",
+    [P11D, CODE.passkeys],
+  ),
+  moved(
+    "b6",
+    "parity",
+    "Email codes",
+    "A code for sign-in, for a reset, for the address check of a sign-up, and for a change of address.",
+    "A code for sign-in, for a reset, for the address check, and for a change of address.",
+    [P12A, CODE.password],
+  ),
+  moved(
+    "b14",
+    "parity",
+    "API tokens",
+    "Permissions, a rate limit, a quota with a refill, and metadata for each token, and tokens that an organization owns.",
+    "Permissions, a rate limit, a quota, and metadata for each key, and keys that an organization owns.",
+    [CODE.tokens, CODE.organizationTokens],
+  ),
+  moved(
+    "b15",
+    "parity",
+    "Organizations",
+    "Roles with permission statements, custom and dynamic roles, teams, and a slug check. Also ranked roles, invitations, limits, and hooks.",
+    "Roles with permission statements, custom and dynamic roles, teams, and a slug check.",
+    [CODE.roles, CODE.teams],
+  ),
+  moved(
+    "b16",
+    "parity",
+    "Access control",
+    "organizations.statements and organizations.roles set the permissions of each role, and a route checks a permission.",
+    "An access control builder.",
+    [CODE.access],
+  ),
+  moved(
+    "b17",
+    "parity",
+    "Admin tools",
+    "Operator routes list users, ban a user, set the platform role, act as a user, and end the sessions of a user.",
+    "List users, ban a user, set a role, act as a user, and end the sessions of a user.",
+    [CODE.operatorUsers, CODE.impersonation],
+  ),
+  moved(
+    "b18",
+    "parity",
+    "Guest sessions",
+    "anonymous turns on guest sessions. A sign-up replaces the guest user, and a hook moves its data to the account.",
+    "Guest sessions that link to the account at the upgrade.",
+    [CODE.anonymous],
+  ),
+  moved(
+    "b19",
+    "parity",
+    "User name sign-in",
+    "Sign-in with a user name, which username turns on.",
+    "Sign-in with a user name.",
+    [CODE.username],
+  ),
+  moved(
+    "b20",
+    "parity",
+    "Phone sign-in",
+    "Sign-in by an SMS code, which phone turns on.",
+    "Sign-in by an SMS code.",
+    [P12I],
+  ),
+  moved(
+    "b21",
+    "parity",
+    "Google One Tap",
+    "A route takes the ID token of Google One Tap, with a nonce by default.",
+    "Google One Tap.",
+    [CODE.idToken],
+  ),
+  moved(
+    "b22",
+    "parity",
+    "Several sessions",
+    "multiSession keeps the sessions of several users in one browser, with an account switch.",
+    "Several sessions in one browser.",
+    [CODE.multiSession],
+  ),
+  moved(
+    "b23",
+    "parity",
+    "The last method",
+    "lastMethod sets a cookie with the last sign-in method of the browser.",
+    "Remembers the last sign-in method.",
+    [CODE.lastMethod],
+  ),
+  moved(
+    "b33",
+    "parity",
+    "SSO plugin",
+    "SSO for each organization ships in core, and sso turns it on.",
+    "SSO for each organization.",
+    [CODE.sso],
+  ),
+  moved(
+    "b34",
+    "parity",
+    "SCIM plugin",
+    "Directory provisioning ships in core, and scim turns it on.",
+    "Directory provisioning.",
+    [CODE.scim],
+  ),
+  moved(
+    "d1",
+    "parity",
+    "Schema output",
+    "authtempo generate prints the schema as SQL, as a Drizzle schema, or as Prisma models.",
+    "Prisma and Drizzle schemas, or SQL for Kysely.",
+    [CODE.generate],
+  ),
+  moved(
+    "d4",
+    "parity",
+    "A first operator account",
+    "authtempo create-admin makes the first platform operator of a deployment.",
+    "The create-admin command, with the admin plugin.",
+    [CODE.createAdmin],
+  ),
+  moved(
+    "d6",
+    "parity",
+    "Upgrade command",
+    "authtempo upgrade moves every authtempo package of an app to one version.",
+    "The upgrade command updates the packages of one release.",
+    [CODE.upgrade],
+  ),
+  moved(
+    "f15",
+    "parity",
+    "Disclosure policy",
+    "A SECURITY.md with a first answer within 72 hours and a disclosure within 90 days.",
+    "A SECURITY.md with a 72-hour answer and a 90-day disclosure.",
+    [CODE.securityPolicy],
+  ),
+  moved(
+    "g2",
+    "parity",
+    "Migrations and ORM schemas",
+    "Append-only SQL files, authtempo migrate, and authtempo generate. The Postgres, MySQL, and SQLite adapters apply the migrations in code.",
+    "auth migrate, auth generate, and getMigrations in code.",
+    [CODE.generate, CODE.postgresMigrations],
+  ),
+  moved(
+    "g7",
+    "parity",
+    "OpenTelemetry",
+    "@authtempo/observe sends logs, a span for each request, and metrics as OTLP JSON over HTTP.",
+    "OpenTelemetry spans, on by default and marked experimental. One option turns them off.",
+    [CODE.otlp],
+  ),
+  moved(
+    "a32",
+    "parity",
+    "ASVS 5.0 sessions",
+    "A session list, the end of one, of the others, or of all, a fresh-session rule, and an absolute lifetime. An operator ends the sessions of a user.",
+    "A list, the end of one, of the others, or of all, freshAge, and an admin who ends the sessions of a user.",
+    [P12A, P12B, CODE.operatorSessions, CODE.sessionList],
+  ),
 
   // Where Better Auth does more today.
   moved(
@@ -477,38 +727,6 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "jwtMint.alg is EdDSA, ES256, or RS256, and the ID token signs with it. No PS256 and no ES512.",
     "RS256, PS256, ES256, ES512, and EdDSA.",
     [P12E],
-  ),
-  {
-    ...row(
-      "a27",
-      "better-auth",
-      "WebAuthn Level 3",
-      "Passkey autofill. No passkey-first sign-up, no extensions, no related origins, no hints, and no Signal API.",
-      "Autofill, the PRF, largeBlob, and credProps extensions, and passkey-first sign-up.",
-    ),
-    source: merged("a27", [P11D]),
-  },
-  row(
-    "a28",
-    "better-auth",
-    "SCIM 2.0",
-    "No directory provisioning.",
-    "Users and Groups through @better-auth/scim.",
-  ),
-  row(
-    "a29",
-    "better-auth",
-    "SAML 2.0 and SSO",
-    "No SSO for each organization.",
-    "SAML 2.0 and OIDC SSO for each organization, through @better-auth/sso.",
-  ),
-  moved(
-    "a32",
-    "better-auth",
-    "ASVS 5.0 sessions",
-    "A session list, the end of one or of the others, a fresh-session rule, and an absolute lifetime. No operator ends the sessions of a user.",
-    "A list, the end of one, of the others, or of all, freshAge, and an admin who ends the sessions of a user.",
-    [P12A, P12B],
   ),
   moved(
     "b2",
@@ -526,24 +744,6 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "TOTP, a code by email or SMS, backup codes, trusted devices, and a lockout that is on by default.",
     [P12C],
   ),
-  {
-    ...row(
-      "b4",
-      "better-auth",
-      "Passkeys",
-      "Passkeys with user verification and autofill. No passkey-first sign-up.",
-      "The passkey plugin, with passkey-first sign-up.",
-    ),
-    source: merged("b4", [P11D]),
-  },
-  moved(
-    "b6",
-    "better-auth",
-    "Email codes",
-    "A code for sign-in, for a reset, and for a change of address. The address check of a sign-up uses a link.",
-    "A code for sign-in, for a reset, for the address check, and for a change of address.",
-    [P12A],
-  ),
   moved(
     "b9",
     "better-auth",
@@ -560,134 +760,28 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "Each item of the OAuth rows above.",
     [P12E],
   ),
-  row(
-    "b14",
-    "better-auth",
-    "API tokens",
-    "API tokens of one user, with an optional organization. No scopes, no limit for each token, and no metadata.",
-    "Permissions, a rate limit, a quota, and metadata for each key, and keys that an organization owns.",
-  ),
-  row(
-    "b15",
-    "better-auth",
-    "Organizations",
-    "Ranked roles, invitations, limits, and hooks. No teams, no permission statements, and no custom roles.",
-    "Roles with permission statements, custom and dynamic roles, teams, and a slug check.",
-  ),
-  row(
-    "b16",
-    "better-auth",
-    "Access control",
-    "No access control builder.",
-    "An access control builder.",
-  ),
-  row(
-    "b17",
-    "better-auth",
-    "Admin tools",
-    "The operator routes cover the keys, the secrets, and the info report only.",
-    "List users, ban a user, set a role, act as a user, and end the sessions of a user.",
-  ),
-  row(
-    "b18",
-    "better-auth",
-    "Guest sessions",
-    "No guest session.",
-    "Guest sessions that link to the account at the upgrade.",
-  ),
-  row(
-    "b19",
-    "better-auth",
-    "User name sign-in",
-    "No sign-in with a user name.",
-    "Sign-in with a user name.",
-  ),
-  row("b20", "better-auth", "Phone sign-in", "No phone sign-in.", "Sign-in by an SMS code."),
-  row(
-    "b21",
-    "better-auth",
-    "Google One Tap",
-    "No route that takes an ID token from Google One Tap.",
-    "Google One Tap.",
-  ),
-  row(
-    "b22",
-    "better-auth",
-    "Several sessions",
-    "No account switch in one browser.",
-    "Several sessions in one browser.",
-  ),
-  row(
-    "b23",
-    "better-auth",
-    "The last method",
-    "Not supported.",
-    "Remembers the last sign-in method.",
-  ),
-  row(
+  moved(
     "b25",
     "better-auth",
     "OAuth on preview hosts",
-    "No proxy, and no redirect override for each provider.",
+    "No proxy. baseURL takes a list of exact hosts, and each provider takes a redirectURI.",
     "OAuth on preview deployments through a proxy.",
+    [CODE.config],
   ),
-  row("b33", "better-auth", "SSO plugin", "Not supported.", "SSO for each organization."),
-  row("b34", "better-auth", "SCIM plugin", "Not supported.", "Directory provisioning."),
-  row(
-    "d1",
-    "better-auth",
-    "Schema output",
-    "No schema output. The adapters ship SQL migration files.",
-    "Prisma and Drizzle schemas, or SQL for Kysely.",
-  ),
-  row(
-    "d4",
-    "better-auth",
-    "A first operator account",
-    "No command for a first operator account.",
-    "The create-admin command, with the admin plugin.",
-  ),
-  row(
-    "d6",
-    "better-auth",
-    "Upgrade command",
-    "No upgrade command.",
-    "The upgrade command updates the packages of one release.",
-  ),
-  row(
-    "f15",
-    "better-auth",
-    "Disclosure policy",
-    "No SECURITY.md yet.",
-    "A SECURITY.md with a 72-hour answer and a 90-day disclosure.",
-  ),
-  row(
+  moved(
     "g1",
     "better-auth",
     "Database adapters",
-    "D1, Postgres, and memory.",
+    "D1, Postgres, MySQL, SQLite, and memory.",
     "Kysely for SQLite, D1, Postgres, MySQL, and MSSQL, then Prisma, Drizzle, MongoDB, and memory.",
-  ),
-  row(
-    "g2",
-    "better-auth",
-    "Migrations and ORM schemas",
-    "Append-only SQL files and authtempo migrate. No ORM schema output.",
-    "auth migrate, auth generate, and getMigrations in code.",
-  ),
-  row(
-    "g7",
-    "better-auth",
-    "OpenTelemetry",
-    "Fixed log lines with event names. No spans and no metrics.",
-    "OpenTelemetry spans, an experimental option since 1.7.4.",
+    [CODE.mysql, CODE.sqlite],
   ),
   row(
     "g10",
     "better-auth",
     "Releases",
     "One version of every package, from 0.1.0.",
-    "Weekly patches on 1.7 and on 1.6.",
+    "Several patches a week on 1.7, and a patch on 1.6 every few weeks. Betas of 1.8 since 2026-10-15.",
   ),
   row(
     "g11",
@@ -702,7 +796,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "better-auth",
     "A new app from the CLI",
     "authtempo init copies a tested example of each stack, and each copy passes its own test. No stack is Next.js.",
-    "The init command covers Next.js and SQLite only.",
+    "The init command detects 13 frameworks, Next.js too. It sets up SQLite, Postgres, MySQL, MSSQL, MongoDB, Drizzle, or Prisma.",
   ),
   moved(
     "a31",

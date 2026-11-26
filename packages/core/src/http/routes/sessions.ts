@@ -1,7 +1,12 @@
 import type { ResolvedConfig } from "../../config.js";
 import { bagTokens, signOutBrowser } from "../../engine/multi-session.js";
 import { deliverLogouts } from "../../engine/oauth-logout.js";
-import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/session-list.js";
+import {
+  listSessions,
+  revokeAllSessions,
+  revokeOtherSessions,
+  revokeSession,
+} from "../../engine/session-list.js";
 import {
   destroySession,
   markRequestUser,
@@ -173,6 +178,22 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
           respond(await revokeOtherSessions(ctx.config, { session: s.resolved })),
           s.renewed,
         );
+      },
+    },
+    {
+      method: "POST",
+      path: "/sessions/revoke-all",
+      key: "POST /sessions/revoke-all",
+      async handler(ctx) {
+        const s = await withSession(ctx.config, ctx.request);
+        if (!s) return unauthorized();
+        const r = await revokeAllSessions(ctx.config, { session: s.resolved });
+        if (!r.ok) return sent(respond(r), s.renewed);
+        // The caller's own session ended: answer as the sign-out does, as
+        // `POST /sessions/revoke` does for the caller's own id.
+        return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), {
+          ended: r.value.ended,
+        });
       },
     },
   ];

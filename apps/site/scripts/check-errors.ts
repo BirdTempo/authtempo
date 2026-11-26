@@ -16,7 +16,7 @@ export interface RouteCodes {
  * The codes that the router answers and no entry of ROUTES declares, with the
  * reason (decision 4 of plan 12n). Their cells come from the router rules and
  * `BODY_CAPS`, so the Routes rules leave them out. Core exports ROUTER_CODES
- * only. So the four other names are written here, as core names them.
+ * only. So the five other names are written here, as core names them.
  * LARGE_READ_CODES holds the cells of two of them.
  */
 export const ROUTER_LEVEL: Readonly<Record<string, string>> = {
@@ -24,6 +24,8 @@ export const ROUTER_LEVEL: Readonly<Record<string, string>> = {
     ROUTER_CODES.map((code) => [code, "ROUTER_CODES of core; the router answers it on each route"]),
   ),
   host_not_allowed: "HOST_CODE of core; the router answers it while baseURL is a list",
+  client_ip_missing:
+    "CLIENT_IP_CODE of core; the router answers it while limits.noClientIp is refuse",
   body_too_large: "BODY_CODE of core; the router answers it past the body cap of a route",
   body_busy: "BUSY_CODE of core; the router answers it for a large read past the budget",
   body_timeout: "TIMEOUT_CODE of core; the router answers it for a large read past its deadline",

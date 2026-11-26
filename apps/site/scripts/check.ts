@@ -5,9 +5,15 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
-import { PROVIDERS } from "@authtempo/cli/program";
+import { COMMANDS, PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
-import { ERRORS, GUIDES, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
+import {
+  ERRORS,
+  GUIDES,
+  LIMITS_FROM_SETTINGS,
+  OAUTH_ERRORS,
+  SCHEMA_VERSION,
+} from "@authtempo/core";
 import { STORAGE_ERROR_CODES } from "@authtempo/core/errors";
 import { EVENTS, LIMIT_FAMILIES } from "@authtempo/core/observe";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
@@ -15,7 +21,13 @@ import { FIELD_KINDS } from "@authtempo/core/redact";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { readChangelogFiles } from "../src/data/changelogs.ts";
-import { COMPARE_ROWS, HOSTED_MODELS, otherNames } from "../src/data/compare.ts";
+import {
+  BETTER_AUTH_READ,
+  BETTER_AUTH_VERSION,
+  COMPARE_ROWS,
+  HOSTED_MODELS,
+  otherNames,
+} from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
@@ -329,6 +341,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distPageOrEmpty("/docs/reference/limits/"),
         LIMIT_FAMILIES,
         limitWindows(coreSources(), DYNAMIC_LIMITS),
+        Object.keys(LIMITS_FROM_SETTINGS),
       ),
   },
   {
@@ -497,13 +510,21 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         // Outside a git checkout this is an error, and check-facts fails with it (re-review R1).
         tracked: trackedFiles(REPO),
         today: new Date(),
+        betterAuth: { version: BETTER_AUTH_VERSION, read: BETTER_AUTH_READ },
       }),
   },
-  // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route or a
-  // config key. It fails while ROUTES or the config keys hold that fact.
+  // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route, a
+  // config key, a command, or a file. It fails while the code holds that fact.
   {
     name: "check-compare",
-    run: () => checkCompare({ rows: COMPARE_ROWS, routes: ROUTES, keys: configKeyPaths() }),
+    run: () =>
+      checkCompare({
+        rows: COMPARE_ROWS,
+        routes: ROUTES,
+        keys: configKeyPaths(),
+        commands: Object.keys(COMMANDS),
+        tracked: trackedFiles(REPO),
+      }),
   },
   // Plan 11b Task 7: the feed of dist is valid Atom, with one entry per version
   // heading and one row of RELEASE_DATES each. The root comes from repo.ts (ruling 24).

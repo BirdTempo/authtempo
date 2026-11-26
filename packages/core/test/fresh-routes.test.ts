@@ -308,6 +308,7 @@ describe("the fresh rule on the routes of other sections (plan 12a, ASVS 5.0.0 7
       ["/second-factor/disable", { method: "email", password: PASSWORD }],
       ["/sessions/revoke", { id: other.session.id }],
       ["/sessions/revoke-others", {}],
+      ["/sessions/revoke-all", {}],
       ["/identities/unlink", { id: "i-1" }],
       ["/user/delete", {}],
     ];

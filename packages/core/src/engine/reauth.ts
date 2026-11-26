@@ -2,10 +2,9 @@ import type { ResolvedConfig } from "../config.js";
 import { limit } from "../limiter/limit.js";
 import type { ReauthEventMethod } from "../observe/events.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { hasAddress } from "./address.js";
-import { checkCode, consumeCode, issueCode, REQUEST_PER_EMAIL, verifyGate } from "./email-otp.js";
+import { issueCode, proveReauthCode, REQUEST_PER_EMAIL } from "./email-otp.js";
 import { markFresh } from "./fresh.js";
 import { provePasskeyOf, reauthPasskeyChallenge } from "./passkeys.js";
 import { checkUserPassword } from "./password.js";
@@ -80,25 +79,6 @@ export function reauthPasskeyOptions(
   input: { session: ResolvedSession; ip: string | null },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   return reauthPasskeyChallenge(config, { user: input.session.user, ip: input.ip });
-}
-
-/** A right re-authentication code, spent. The verify limits of every mailed code apply. */
-async function proveReauthCode(
-  config: ResolvedConfig,
-  user: UserRow,
-  code: string,
-  ip: string | null,
-): Promise<Result<true>> {
-  if (!config.emailOtp) return fail("not_found");
-  // No code goes to a user with no address (plan 12i), so no code matches.
-  if (!hasAddress(user)) return fail("invalid_code");
-  const gate = await verifyGate(config, { email: user.email, ip });
-  if (!gate.ok) return gate;
-  const now = config.clock.now();
-  const checked = await checkCode(config, "reauth-otp", user.email, code, now);
-  if (!checked.ok) return checked;
-  const spent = await consumeCode(config.storage, checked.value, now);
-  return spent.ok ? ok(true) : spent;
 }
 
 export async function reauthenticate(

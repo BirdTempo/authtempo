@@ -79,7 +79,8 @@ export interface RouteEntry {
   /**
    * The config that turns the route on. `session`, `magicLink`, and `tokens`
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
-   * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
+   * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`,
+   * or `totp` set with `emailOtp`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`;
    * `oauthDevice` needs `oauth` with `device` (plan 12e); `operator`
    * needs `operator.secretHash` (plan 11c) or `operator.secrets` (plan 12f), and `/operator/keys/rotate` also
@@ -203,6 +204,14 @@ export const ROUTES = Object.freeze([
   {
     method: "POST",
     path: "/sessions/revoke-others",
+    feature: "account",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "session_not_fresh"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sessions/revoke-all",
     feature: "account",
     auth: ["session"],
     codes: ["unauthorized", "rate_limited", "session_not_fresh"],
@@ -853,6 +862,8 @@ export const ROUTES = Object.freeze([
       "invalid_body",
       "rate_limited",
       "invalid_credentials",
+      "invalid_code",
+      "too_many_attempts",
       "email_unverified",
       "totp_enabled",
       "conflict",
@@ -3168,6 +3179,14 @@ export type RouterCode = (typeof ROUTER_CODES)[number];
  * never answers it, so a 421 on each operation would be untrue there.
  */
 export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
+
+/**
+ * The code that the router answers on every route for a request with no
+ * client IP, while `limits.noClientIp` is `refuse`. No entry declares it,
+ * and the OpenAPI document states it in its rules, as it states `HOST_CODE`:
+ * a deployment with the default `shared` never answers it.
+ */
+export const CLIENT_IP_CODE = "client_ip_missing" as const satisfies ErrorCode;
 
 /**
  * The code that the router answers for a request body past the cap of its

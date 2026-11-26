@@ -18,7 +18,9 @@ sources:
 
 ## The rate limits
 
-A key ends in the address, the IP, or the user id. A request with no client IP uses `unknown` in place of the IP.
+A key ends in the address, the IP, or the user id. A request with no client IP uses `unknown` in place of the IP, unless `limits.noClientIp` refuses it.
+
+Each row gives the default window. [Change a limit](#change-a-limit) tells how a deployment sets another window.
 
 The first two parts of a key are its family, such as `magic-link:email`. A refusal emits the event `limit.hit` with the family and no part of the key. Each family of `LIMIT_FAMILIES` has one row here, and a site check holds the table to the code.
 
@@ -67,7 +69,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `anonymous-delete:user:<userId>` | 1 hour | 5 | Anonymous delete, after the check that the user is anonymous |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
-| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The proof of the TOTP setup, and the password check of each method enable and of the method disable, on one budget |
 | `totp-verify:ip:<ip>` | 15 minutes | 30 | Second factor challenge |
 | `second-factor-passkey:ip:<ip>` | 15 minutes | 30 | The passkey options of a second factor challenge |
 | `second-factor-email:user:<userId>` | 15 minutes | 5 | Second factor email code send |
@@ -81,7 +83,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `token-use:to:<tokenId>` | The token's `rateLimitSeconds` | The token's `rateLimitMax` | Each call of one organization token with a window, by the rule of `token-use:tk:<tokenId>` |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
-| `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
+| `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke, revoke-others, and revoke-all together |
 | `user-update:user:<userId>` | 15 minutes | 30 | Profile update |
 | `passkey-rename:user:<userId>` | 15 minutes | 30 | Passkey rename, also for an unknown id. A refused name counts no try |
 | `email-change:user:<userId>` | 1 hour | 5 | Change of address request |
@@ -150,6 +152,48 @@ The phone add counts on `phone-add:phone`, not on the two `phone-otp` keys of a 
 The per-number phone keys read the number as given. Two E.164 forms can name one handset, such as `+4407700900123` and `+447700900123`. Each form then gets its own count. Core uses no phone library and does not rewrite a number. Give an SMS port that refuses a form that its supplier rewrites.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
+
+## Change a limit
+
+`limits.windows` gives a limit family another window. The key is the family, the first two parts of a key of the table.
+
+| Entry of `limits.windows` | The window that it sets |
+| --- | --- |
+| `"otp:email": { max: 5 }` | 5 code requests for each address in the default 15 minutes |
+| `"password:ip": { max: 10, seconds: 300 }` | 10 sign-in tries for each IP in 5 minutes |
+
+- `max` is the count of calls, a whole number from 1 to 100000.
+- `seconds` is the length of the window, a whole number from 1 to 86400. Leave it out to keep the default length.
+- Core refuses a family that it does not know at the start, so a wrong name never changes nothing in silence.
+- The stored key holds the window. So a new window starts a new count, and the old count ends with its own window.
+- `GET /operator/info` lists `limits.windows` in the config keys, with no value.
+
+:::caution
+Warning: a higher `max` or a shorter window lets a caller try more. The numbers of the table are the reviewed numbers. Raise a limit that guards a guess, such as `otp-verify:email` or `totp-code:user`, only after you size the guess rate that it permits.
+:::
+
+Six families take their window from another setting, and `limits.windows` refuses each one. Change that setting.
+
+| Family | The setting of its window |
+| --- | --- |
+| `token-use:tk`, `token-use:to` | The `rateLimit` of the token |
+| `oauth-device-poll:code` | The poll interval of the device code |
+| `phone-otp:all-day` | `phone.dailyCap` |
+| `anonymous:all-day` | `anonymous.dailyCap` |
+| `passkey-sign-up:all-day` | `passkey.signUp.dailyCap` |
+
+## A request with no client IP
+
+`clientIp` gives null when the request has no client IP. The default `clientIp` reads `cf-connecting-ip`, which only Cloudflare sets.
+
+- **`limits.noClientIp: "shared"`**, the default. Each per-IP limit counts the request on the one key `unknown`. So one caller with no IP can spend the count of each other caller with no IP.
+- **`limits.noClientIp: "refuse"`**. `handle` answers 403 [`client_ip_missing`](/docs/reference/errors/#client_ip_missing) before any route. No limit counts the request, and no key is shared.
+
+Use `"refuse"` when your proxy always sets the client IP. A request with no IP then did not come through that proxy.
+
+With `"refuse"`, an in-process call of `auth.api` with `ip: null` throws at its first per-IP limit. Pass the client IP of the person. For a call with no person, such as a job, pass a fixed text that names the caller. A text that is not an IP keys `text:` and the text, so it has a count of its own.
+
+A `clientIp` function that throws still answers 500 `internal`. Only a null is a request with no client IP.
 
 ## The device code
 

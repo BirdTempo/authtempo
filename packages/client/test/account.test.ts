@@ -241,6 +241,28 @@ describe("the settings operations (plan 12a)", () => {
   });
 });
 
+describe("sessions.revokeAll", () => {
+  it("sends one call with an empty body and answers the count", async () => {
+    const { seen, fetch } = scripted([Response.json({ ended: 3 })]);
+    const c = createClient({ baseURL: BASE, fetch, broadcast: false });
+    expect(await c.sessions.revokeAll()).toEqual({ ok: true, value: { ended: 3 } });
+    expect(seen).toEqual([{ method: "POST", path: "/sessions/revoke-all", body: {} }]);
+  });
+
+  it("answers the failure as it is", async () => {
+    const { seen, fetch } = scripted([
+      Response.json({ error: "session_not_fresh" }, { status: 403 }),
+    ]);
+    const c = createClient({ baseURL: BASE, fetch, broadcast: false });
+    expect(await c.sessions.revokeAll()).toEqual({
+      ok: false,
+      code: "session_not_fresh",
+      status: 403,
+    });
+    expect(seen).toHaveLength(1);
+  });
+});
+
 describe("sessions.revoke and the caller's own session (plan 12a)", () => {
   it("sends one revoke, and answers current true from the answer for its own session", async () => {
     const { seen, fetch } = scripted([Response.json({ ok: true, current: true })]);
@@ -351,6 +373,7 @@ describe("the shape of each 200 answer (plan 12a)", () => {
       ["{}", '{"ok":false,"current":true}', '{"ok":true}', '{"ok":true,"current":"yes"}'],
     ],
     ["sessions.revokeOthers", (c) => c.sessions.revokeOthers(), ["{}", '{"ended":"2"}']],
+    ["sessions.revokeAll", (c) => c.sessions.revokeAll(), ["{}", '{"ended":"2"}']],
     [
       "passkeys.rename",
       (c) => c.passkeys.rename({ id: "p", name: "Phone" }),

@@ -65,7 +65,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Signal API reads, and the three multi-session calls.
     // Plan 13a Task 11 adds the five setup link calls and the seven setup session calls.
     // Plan 13b Task 7 adds the organization audit list. The export calls the same row.
-    expect(CLIENT_CALLS).toHaveLength(144);
+    // sessions.revokeAll adds one call.
+    expect(CLIENT_CALLS).toHaveLength(145);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -174,6 +175,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.oauth.grants();
     await c.oauth.revoke({ clientId: "cl" });
     await c.totp.setup({ password: "p" });
+    await c.totp.setup({ emailCode: "123456" });
     await c.totp.enable({ code: "1" });
     await c.totp.verify({ challenge: "c", code: "1" });
     await c.totp.disable({ code: "1" });
@@ -183,6 +185,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.sessions.list();
     await c.sessions.revoke({ id: "s" });
     await c.sessions.revokeOthers();
+    await c.sessions.revokeAll();
     await c.reauth.password({ password: "p" });
     await c.reauth.requestEmailCode();
     await c.reauth.passkey();
@@ -259,7 +262,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
     // Task 15 adds six compared rows and three that are not.
     // Plan 13a Task 11 adds twelve compared rows. Plan 13b Task 7 adds the audit list.
-    expect(COMPARED).toHaveLength(134);
+    // sessions.revokeAll adds one compared row.
+    expect(COMPARED).toHaveLength(135);
     expect(NOT_COMPARED).toHaveLength(10);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.

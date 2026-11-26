@@ -1361,6 +1361,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "second-factor disableSecondFactor": "one kind: the user hold, then the factor rows",
   "session-list revokeSession": "one kind: a session row",
   "session-list revokeOtherSessions": "one kind: session rows",
+  // The same deletes as revokeOtherSessions, with no session kept.
+  "session-list revokeAllSessions": "one kind: session rows",
   "social completeLink": "one kind: an update of the session, then a new identity row",
   // Plan 12d Task 5: the SSO sign-in resolves through it, and adds a member row.
   "social resolveSocialUser": ["an SSO sign-in that claims a user"],
@@ -1513,8 +1515,8 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Plan 13b puts an audit row in the transaction of each organization act. Task 4 adds
     // the revoke of an invitation (revokeInvitation). Task 5 adds the revoke of an
     // organization token (revokeOrganizationToken) and the update of a role (updateRole):
-    // 98 (2026-11-24).
-    expect(found.length).toBe(98);
+    // 98 (2026-11-24). The revoke of all sessions (revokeAllSessions): 99 (2026-11-25).
+    expect(found.length).toBe(99);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

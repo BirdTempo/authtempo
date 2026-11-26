@@ -121,7 +121,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.multiSession.switch({ sessionId })` | `POST /multi-session/switch` | `PublicSession` of the session that is now active |
 | `client.multiSession.signOut({ sessionId })` | `POST /multi-session/sign-out` | `{ ok: true }`. It ends one session of this browser; `signOut()` ends each one |
 | `client.lastMethod()` | none | The `LastMethod` of the last sign-in in this browser, from the last method cookie, or `null`. A value outside core's closed set reads as `null`. It names a method, never an account |
-| `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
+| `client.totp.setup({ password })` or `client.totp.setup({ emailCode })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
 | `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
 | `client.totp.disable({ code })` | `POST /totp/disable` | `{ ok: true }` |
@@ -226,6 +226,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 | `client.sessions.list()` | `GET /sessions` | `SessionSummaryJSON[]`, newest first. `current` marks the caller's session. `impersonation` marks a session that a platform operator opened, and names no operator |
 | `client.sessions.revoke({ id })` | `POST /sessions/revoke` | `{ ok: true, current }`. See the rule below the table |
 | `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `{ ended }`, the count of ended sessions |
+| `client.sessions.revokeAll()` | `POST /sessions/revoke-all` | `{ ended }`, the count of ended sessions, with the caller's own. The caller is then signed out |
 | `client.reauth.password({ password, code? })` | `POST /reauth` | `FreshJSON`. `code` is the second factor, while it is on |
 | `client.reauth.requestEmailCode()` | `POST /reauth/email` | `{ sent: true }`. The code goes to the account's address |
 | `client.reauth.emailCode({ emailCode, code? })` | `POST /reauth` | `FreshJSON` |
@@ -248,7 +249,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 
 **A fresh session.** Some changes need a fresh session: a sign-in or a re-authentication that is younger than `session.freshMinutes`. A stale session gets `session_not_fresh` (403), and nothing changes. These calls can answer it:
 
-- `sessions.revoke`, `sessions.revokeOthers`
+- `sessions.revoke`, `sessions.revokeOthers`, `sessions.revokeAll`
 - `user.changeEmail`, `user.delete`
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`

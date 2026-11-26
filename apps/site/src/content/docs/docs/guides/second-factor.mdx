@@ -22,13 +22,13 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 
 ## Steps
 
-1. Keep `totp` on. It is on by default when `password` is set. `totp: false` turns it off.
+1. Keep `totp` on. It is on by default when `password` is set. `totp: false` turns it off. With no `password`, set `totp: {}`: the setup then takes an email code.
 2. Set `totp.issuer` to the name that the authenticator app shows. `createAuth` refuses a colon in the issuer.
 
 <Code code={config} lang="ts" title="The second factor config" />
 
 3. On a settings page, ask for the password.
-4. For TOTP, send the password with `client.totp.setup({ password })`. Show the `uri` as a QR code.
+4. For TOTP, send the password with `client.totp.setup({ password })`. Show the `uri` as a QR code. For a user with no password, call `client.reauth.requestEmailCode()`, ask for the mailed code, and call `client.totp.setup({ emailCode })`.
 5. Call `client.totp.enable({ code })` with a current code from the authenticator app, within 15 minutes.
 6. For a passkey, call `client.secondFactor.passkey.enable({ password })`. The browser asks for a passkey of the user.
 7. For an email code, call `client.secondFactor.email.enable({ password })`.

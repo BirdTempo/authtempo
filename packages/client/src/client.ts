@@ -871,12 +871,14 @@ export interface Client {
   totp: {
     /**
      * The secret, the key URI, and the backup codes, each answered once. Takes
-     * the user's password: a wrong one answers `invalid_credentials`, and no
-     * setup is written.
+     * one proof: the user's password, or a code of `reauth.requestEmailCode()`
+     * for a user with no password. A wrong password answers
+     * `invalid_credentials`, a wrong code answers `invalid_code`, and no setup
+     * is written.
      */
-    setup(input: {
-      password: string;
-    }): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
+    setup(
+      input: { password: string } | { emailCode: string },
+    ): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
     enable(input: { code: string }): Promise<ClientResult<TotpStatusJSON>>;
     verify(input: {
       challenge: string;
@@ -934,6 +936,12 @@ export interface Client {
     revoke(input: { id: string }): Promise<ClientResult<{ ok: true; current: boolean }>>;
     /** Ends every other session of the person. `ended` is the count. */
     revokeOthers(): Promise<ClientResult<{ ended: number }>>;
+    /**
+     * Ends every session of the person, the caller's own too, in one call.
+     * `ended` is the count, with the caller's session. The caller's session
+     * has ended, and a bearer app clears its token.
+     */
+    revokeAll(): Promise<ClientResult<{ ended: number }>>;
   };
   /** The re-authentication (plan 12a). Each proof makes the session fresh and keeps its token. */
   reauth: {
@@ -1660,9 +1668,11 @@ export function createClient(options: ClientOptions): Client {
   };
   const totp: Client["totp"] = {
     setup: (input) =>
-      send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
-        password: input.password,
-      }),
+      send<{ secret: string; uri: string; backupCodes: string[] }>(
+        "totp.setup",
+        // One proof, and no other key of the input.
+        "password" in input ? { password: input.password } : { emailCode: input.emailCode },
+      ),
     enable: (input) => changes(send<TotpStatusJSON>("totp.enable", input)),
     verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
       changes(
@@ -1695,6 +1705,8 @@ export function createClient(options: ClientOptions): Client {
         })(),
       ),
     revokeOthers: () => shaped(send<unknown>("sessions.revokeOthers", {}), isEnded),
+    // The caller's own session ends, so the store reads again and the other tabs hear it.
+    revokeAll: () => changes(shaped(send<unknown>("sessions.revokeAll", {}), isEnded)),
   };
   const reauth: Client["reauth"] = {
     password: ({ password, code }) =>

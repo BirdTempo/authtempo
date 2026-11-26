@@ -8,6 +8,7 @@ import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import {
   type AnonymousCaller,
   anonymousData,
@@ -373,6 +374,32 @@ export async function consumeCode(
     { consumedAt: now, updatedAt: now },
   );
   return n === 1 ? ok(row) : fail("invalid_code");
+}
+
+/**
+ * A right code of `POST /reauth/email`, spent: the proof that the caller
+ * reads the user's mailbox now. The verify limits of every mailed code
+ * apply. The re-authentication uses it (plan 12a), and the TOTP setup uses
+ * it as the proof of a user who gives no password. One copy, so the two
+ * cannot drift. It lived in reauth.ts; totp.ts cannot import that module,
+ * because reauth.ts imports totp.ts.
+ */
+export async function proveReauthCode(
+  config: ResolvedConfig,
+  user: UserRow,
+  code: string,
+  ip: string | null,
+): Promise<Result<true>> {
+  if (!config.emailOtp) return fail("not_found");
+  // No code goes to a user with no address (plan 12i), so no code matches.
+  if (!hasAddress(user)) return fail("invalid_code");
+  const gate = await verifyGate(config, { email: user.email, ip });
+  if (!gate.ok) return gate;
+  const now = config.clock.now();
+  const checked = await checkCode(config, "reauth-otp", user.email, code, now);
+  if (!checked.ok) return checked;
+  const spent = await consumeCode(config.storage, checked.value, now);
+  return spent.ok ? ok(true) : spent;
 }
 
 /**

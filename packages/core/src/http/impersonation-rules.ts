@@ -178,6 +178,7 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /sessions": READ,
   "POST /sessions/revoke": FRESH,
   "POST /sessions/revoke-others": FRESH,
+  "POST /sessions/revoke-all": FRESH,
   "POST /user/update": "It writes the name and the image, which the user sees; no way in changes.",
   "GET /user/change-email/confirm": NO_SESSION,
   "POST /user/change-email/confirm": NO_SESSION,

@@ -59,6 +59,42 @@ describe("totp (plan 9f)", () => {
     expect((await browser.totp.setup({ password: PW })).ok).toBe(true);
   });
 
+  it("sets up TOTP with an email code on a server with no password, and the email code sign-in then asks for the factor", async () => {
+    const server = makeServer({ totp: {} });
+    const { fetch } = inProcessFetch(server.auth);
+    const browser = createClient({ baseURL: BASE_URL, fetch });
+    const mailedCode = () => /\b(\d{6})\b/.exec(server.mail.at(-1)?.text ?? "")?.[1] ?? "";
+    // The email code signs in, and makes the user with a verified address.
+    await browser.emailOtp.request({ email: EMAIL });
+    expect((await browser.emailOtp.verify({ email: EMAIL, code: mailedCode() })).ok).toBe(true);
+    // The password proof does not exist on this server.
+    expect(await browser.totp.setup({ password: PW })).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+    expect((await browser.reauth.requestEmailCode()).ok).toBe(true);
+    const code = mailedCode();
+    const other = code === "000000" ? "111111" : "000000";
+    expect(await browser.totp.setup({ emailCode: other })).toEqual({
+      ok: false,
+      code: "invalid_code",
+      status: 400,
+    });
+    expect(await server.storage.findMany("totp", [])).toEqual([]);
+    const setup = await browser.totp.setup({ emailCode: code });
+    if (!setup.ok) throw new Error(setup.code);
+    const secret = base32Decode(setup.value.secret);
+    const enabled = await browser.totp.enable({ code: await totpCode(secret, server.clock.now()) });
+    expect(enabled.ok).toBe(true);
+    // A second browser: the email code alone opens no session now.
+    const second = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
+    await second.emailOtp.request({ email: EMAIL });
+    const signIn = await second.emailOtp.verify({ email: EMAIL, code: mailedCode() });
+    if (!signIn.ok) throw new Error(signIn.code);
+    expect("twoFactor" in signIn.value).toBe(true);
+  });
+
   it("verifies with a backup code, and signIn sends next to the challenge (parked Minor 6.1)", async () => {
     const { fetch, setup } = await enrolled();
     const native = createClient({ baseURL: BASE_URL, fetch, credentials: "omit" });

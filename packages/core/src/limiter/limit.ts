@@ -1,4 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
+import { NO_IP_KEY } from "./ip-key.js";
+import { windowFor } from "./limit-window.js";
 import type { LimitWindow } from "./port.js";
 
 /**
@@ -157,9 +159,30 @@ export async function limit(
   subject: string,
   window: LimitWindow,
 ): Promise<boolean> {
-  const allowed = await config.limiter.allow(`${family}:${subject}`, window);
+  refuseNoClientIp(config, family, subject);
+  const allowed = await config.limiter.allow(
+    `${family}:${subject}`,
+    windowFor(config.limits, family, window),
+  );
   if (!allowed) config.observe.emit({ name: "limit.hit", family });
   return allowed;
+}
+
+/**
+ * The rule of `limits.noClientIp: "refuse"` in the engine. `handle` answers
+ * 403 `client_ip_missing` before any route, so a request never comes here
+ * with no IP. An in-process call of `auth.api` with `ip: null` does. A count
+ * on the shared key is what the setting forbids, and a refusal as
+ * `rate_limited` would hide the cause. So the call throws, and its text
+ * tells the app what to pass. Only `ipKey(null)` gives the bare key: each
+ * text of a custom `clientIp` gets `text:` first.
+ */
+function refuseNoClientIp(config: ResolvedConfig, family: LimitFamily, subject: string): void {
+  if (config.limits.noClientIp !== "refuse") return;
+  if (subject !== NO_IP_KEY || !family.endsWith(":ip")) return;
+  throw new Error(
+    `authtempo: limits.noClientIp is "refuse", and a call counted ${family} with no client IP. Pass the client IP of the person as ip. For a call with no person, pass a fixed text that names the caller.`,
+  );
 }
 
 /**
@@ -176,6 +199,8 @@ export async function spendLimit(
   subject: string,
   window: LimitWindow,
 ): Promise<void> {
-  for (let i = 0; i <= window.max; i++)
-    if (!(await config.limiter.allow(`${family}:${subject}`, window))) return;
+  // The same window as `limit` counts on, or the spend fills another count.
+  const w = windowFor(config.limits, family, window);
+  for (let i = 0; i <= w.max; i++)
+    if (!(await config.limiter.allow(`${family}:${subject}`, w))) return;
 }

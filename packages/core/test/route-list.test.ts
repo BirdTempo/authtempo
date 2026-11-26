@@ -93,7 +93,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
     // Plan 13a Task 0 adds the 13 routes of the enterprise setup, not mounted yet.
     // Plan 13b Task 0 adds GET /organizations/audit, and Task 6 mounts it.
-    expect(listed.length).toBe(223);
+    // POST /sessions/revoke-all adds one: the end of every session of the user in one call.
+    expect(listed.length).toBe(224);
   });
 
   it("lists only routes that no module mounts as unmounted (plan 13a)", () => {

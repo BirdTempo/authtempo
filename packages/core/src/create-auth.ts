@@ -217,6 +217,7 @@ import {
 } from "./engine/secrets.js";
 import {
   listSessions,
+  revokeAllSessions,
   revokeOtherSessions,
   revokeSession,
   type SessionSummary,
@@ -788,6 +789,13 @@ export interface SessionApi {
   revoke(input: { session: ResolvedSession; id: string }): Promise<Result<{ current: boolean }>>;
   /** Ends every other session and the sessions in waiting. Fresh rule. */
   revokeOthers(input: { session: ResolvedSession }): Promise<Result<{ ended: number }>>;
+  /**
+   * Ends every session of the user, the caller's own too, and the sessions
+   * in waiting, in one transaction. Fresh rule. The count holds the caller's
+   * session. The caller clears its own cookie: `POST /sessions/revoke-all`
+   * does it.
+   */
+  revokeAll(input: { session: ResolvedSession }): Promise<Result<{ ended: number }>>;
   /**
    * Resolves `token` in the write mode, as `POST /session/refresh` does: a
    * due sliding refresh moves the expiry (plan 12a). Null for no live session.
@@ -1691,6 +1699,7 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listSessions(config, i),
         revoke: (i) => revokeSession(config, i),
         revokeOthers: (i) => revokeOtherSessions(config, i),
+        revokeAll: (i) => revokeAllSessions(config, i),
         refresh: (token) => resolveSession(config, token, "write"),
       },
       user: {

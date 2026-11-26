@@ -251,7 +251,8 @@ describe("the routes that answer session_not_fresh and the client README list", 
     // calls and organizations.members.remove. Plan 12d Task 13 adds sso.domains,
     // sso.connections, and scim.tokens. Plan 12i Task 2 adds username.set,
     // and Task 5 phone.add, phone.verifyAdd, and phone.remove.
-    expect(listed).toHaveLength(30);
+    // POST /sessions/revoke-all adds sessions.revokeAll.
+    expect(listed).toHaveLength(31);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

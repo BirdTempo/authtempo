@@ -113,6 +113,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   sms_unavailable:
     "The text message could not be sent now. Try again later, or use another method.",
   host_not_allowed: "This server does not serve this address. Open the app at its usual address.",
+  client_ip_missing: "The server could not read your network address. Try again later.",
   phone_taken: "Another account has this phone number. Use another number.",
   anonymous_refused: "A guest account cannot do this. Sign in or create an account first.",
   body_too_large: "The request was too large. Send less data.",

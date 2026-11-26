@@ -684,7 +684,10 @@ const PLUGIN_RULES: Record<string, Rule> = {
       digits: only(6, "core makes 6-digit codes"),
       period: only(30, "core fixes the step at 30 seconds"),
       backupCodes: refused("core always offers the backup codes"),
-      allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+      allowPasswordless: only(
+        false,
+        "core asks for a proof at every change of the factor, and a session alone is no proof",
+      ),
       disable: only(false, "core serves the TOTP code whenever the plugin is on"),
     }),
     // Core has an email second factor since plan 12c, but it mails through
@@ -708,10 +711,16 @@ const PLUGIN_RULES: Record<string, Rule> = {
       },
       customBackupCodesGenerate: refused("core makes its own backup codes"),
       storeBackupCodes: refused("core stores a keyed hash of each code; leave it out"),
-      allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+      allowPasswordless: only(
+        false,
+        "core asks for a proof at every change of the factor, and a session alone is no proof",
+      ),
     }),
     skipVerificationOnEnable: only(false, "core turns the factor on only after a right code"),
-    allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+    allowPasswordless: only(
+      false,
+      "core asks for a proof at every change of the factor, and a session alone is no proof",
+    ),
     twoFactorTable: refused("core keeps the factor in its own ta_second_factor and ta_totp tables"),
     schema: refused("core keeps the factor in its own ta_second_factor and ta_totp tables"),
     twoFactorCookieMaxAge: refused("core's challenge lives 5 minutes; the cookie lives 600 s"),

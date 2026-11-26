@@ -496,8 +496,7 @@ export function createApi(
     },
     async revokeSessions({ headers }) {
       const s = await caller(headers);
-      unwrap(await auth.api.session.revokeOthers({ session: s }));
-      unwrap(await auth.api.session.revoke({ session: s, id: s.session.id }));
+      unwrap(await auth.api.session.revokeAll({ session: s }));
       return { status: true };
     },
     async updateUser({ body, headers }) {
