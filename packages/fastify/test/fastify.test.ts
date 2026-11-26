@@ -14,6 +14,8 @@ const DAY = 24 * 60 * 60 * 1000;
 interface AppOptions {
   /** core's own basePath. The binding gets no basePath option. */
   basePath?: string;
+  /** Turn on core's last method cookie, so a sign-in answers two Set-Cookie lines. */
+  lastMethod?: boolean;
   /** Register the routes of core before the session hook. */
   routesFirst?: boolean;
   /** A hook of the app sets a cookie before the routes of core run. */
@@ -76,6 +78,7 @@ async function makeApp(core: AppOptions = {}) {
     },
     clock: { now: () => now },
     ...(core.basePath ? { basePath: core.basePath } : {}),
+    ...(core.lastMethod ? { lastMethod: {} } : {}),
   });
   // The real session call of core, with a count of the calls of the gate.
   const counter = { reads: 0 };
@@ -179,15 +182,15 @@ function linesOf(set: string | string[] | undefined): string[] {
 
 describe("@authtempo/fastify (plan 11d2)", () => {
   it("serves the routes of core with the raw JSON body, and passes every Set-Cookie line", async () => {
-    const { app, signIn } = await makeApp();
+    const { app, signIn } = await makeApp({ lastMethod: true });
     expect((await app.inject({ method: "GET", url: "/auth/session" })).statusCode).toBe(401);
-    // The old cookie name (plan 12b): core answers the session line and the clear of the old name.
-    const { cookie, lines } = await signIn("json", { cookie: "tempo_session=ts_old" });
+    // Two Set-Cookie lines of core in one answer: with `lastMethod` on, a browser sign-in
+    // sets the session cookie and the last method cookie. Until 0.2.0 this test got its
+    // second line from the clear of the old cookie `tempo_session`, which core reads no more.
+    const { cookie, lines } = await signIn("json");
     expect(cookie.startsWith("__Host-tempo_session=ts_")).toBe(true);
     expect(lines).toHaveLength(2);
-    expect(lines.some((l) => l.startsWith("tempo_session=;") && l.includes("Max-Age=0"))).toBe(
-      true,
-    );
+    expect(lines.some((l) => l.startsWith("__Host-tempo_last_method=magic_link;"))).toBe(true);
   });
 
   it("serves a form post, which Fastify does not parse by itself", async () => {

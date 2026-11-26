@@ -1,10 +1,6 @@
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import { bodyCapOf } from "@authtempo/core/bindings";
-import {
-  DEFAULT_COOKIE_NAME,
-  LEGACY_COOKIE_NAME,
-  SESSION_TOKEN_PREFIX,
-} from "@authtempo/core/credentials";
+import { DEFAULT_COOKIE_NAME, SESSION_TOKEN_PREFIX } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
 import { authProxy, authRouteHandlers, authSession } from "../src/index.js";
 
@@ -108,20 +104,17 @@ describe("@authtempo/next (plan 11d)", () => {
       new Request(`${BASE}/account`, { headers: { cookie: `${DEFAULT_COOKIE_NAME}=ts_any` } }),
     );
     expect(withCookie).toBeUndefined();
-    // The name before plan 12b counts for one release, as core reads it.
-    const legacy = await proxy(
-      new Request(`${BASE}/account`, { headers: { cookie: `${LEGACY_COOKIE_NAME}=ts_any` } }),
+    // The name before plan 12b counts no more (0.2.0): core does not read it.
+    const old = await proxy(
+      new Request(`${BASE}/account`, { headers: { cookie: "tempo_session=ts_any" } }),
     );
-    expect(legacy).toBeUndefined();
-    // A custom cookie name reads no old name.
+    expect(old?.status).toBe(307);
+    // A custom cookie name reads its own name only.
     const custom = authProxy({ protect: () => true, signInPath: "/sign-in", cookieName: "app_s" });
-    expect(
-      (
-        await custom(
-          new Request(`${BASE}/account`, { headers: { cookie: `${LEGACY_COOKIE_NAME}=ts_any` } }),
-        )
-      )?.status,
-    ).toBe(307);
+    const request = (cookie: string) => new Request(`${BASE}/account`, { headers: { cookie } });
+    expect((await custom(request("tempo_session=ts_any")))?.status).toBe(307);
+    expect((await custom(request(`${DEFAULT_COOKIE_NAME}=ts_any`)))?.status).toBe(307);
+    expect(await custom(request("app_s=ts_any"))).toBeUndefined();
   });
 
   it("asks core for the session when the proxy has the auth instance", async () => {

@@ -365,7 +365,7 @@ async function pageInput(
  * built with `setupSessionRoute` by the tasks that own them.
  */
 export function ssoSetupRoutes(config: ResolvedConfig): Route[] {
-  if (!config.sso || !config.sso.setup) return [];
+  if (!config.sso?.setup) return [];
   return [
     {
       method: "GET",

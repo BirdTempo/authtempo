@@ -10,7 +10,7 @@ needs a new enrolment.
 authtempo import <provider> [files] --formats <the seam's list> --target postgres --url-env DATABASE_URL --dry-run
 ```
 
-The command is `authtempo import` in `@authtempo/cli` (plan 11c). The old binary `authtempo-import` stays for one release as an alias with its old flags, and prints one deprecation line. The connection string comes from the variable that `--url-env` names (default `DATABASE_URL`) or from `--url-file`, never from a flag value.
+The command is `authtempo import` in `@authtempo/cli` (plan 11c). Release 0.2.0 removes the old binary `authtempo-import`. The connection string comes from the variable that `--url-env` names (default `DATABASE_URL`) or from `--url-file`, never from a flag value.
 
 Run `--dry-run` first. It prints the report a real run prints. The importer
 writes only rows that a core flow writes: an address is verified only where

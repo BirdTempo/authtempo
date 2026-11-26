@@ -125,10 +125,12 @@ authtempo import supabase --users users.csv --identities identities.csv \
 ```
 
 The readers, the report, and the exit codes are those of
-`@authtempo/import` (its README names every flag of each provider). The
-flag map from the old binary:
+`@authtempo/import` (its README names every flag of each provider).
 
-| `authtempo-import` | `authtempo import` |
+Release 0.2.0 removes the old binary `authtempo-import`. Run
+`authtempo import` instead. This table gives the new form of each old flag:
+
+| Old flag | `authtempo import` |
 | --- | --- |
 | `--postgres <url>` | `--target postgres` with `--url-env <NAME>` (default `DATABASE_URL`) or `--url-file <path>` |
 | `--better-auth` | `--tables compat` (default `core`) |
@@ -140,13 +142,6 @@ flag map from the old binary:
 `--json` prints `{ report, stopped, bundle, verify, exit }`: the report is
 the JSON of `--report <file>`, and `verify` is the answer of `import verify`,
 else null.
-
-## The alias authtempo-import
-
-`authtempo-import` stays for one release with its old flags and usage text.
-It prints one deprecation line on stderr, and with `--postgres` a second
-line, because a connection string on the command line goes into the shell
-history and the process list.
 
 ## check
 

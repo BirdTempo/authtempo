@@ -1,6 +1,7 @@
 // Shapes checked against the expo-web-browser, expo-crypto, and electron docs on 2026-10-09 (expo-web-browser 57.0.3, expo-crypto 57.0.3).
+
+import type { PkceCrypto } from "@authtempo/client/oauth";
 import type { HandoffOpener } from "./handoff.js";
-import type { HandoffCrypto } from "./pkce.js";
 import type { TokenStore } from "./token-store.js";
 
 export type { TokenStore } from "./token-store.js";
@@ -53,7 +54,7 @@ export interface ExpoCryptoLike<A> {
  * random bytes. The digest input is a copy on its own `ArrayBuffer`, the same
  * as `webCrypto()`, because `BufferSource` refuses a shared buffer.
  */
-export function expoCrypto<A>(Crypto: ExpoCryptoLike<A>): HandoffCrypto {
+export function expoCrypto<A>(Crypto: ExpoCryptoLike<A>): PkceCrypto {
   return {
     randomBytes: (n) => Crypto.getRandomBytes(n),
     sha256: async (data) =>

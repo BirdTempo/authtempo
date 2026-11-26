@@ -29,7 +29,8 @@ dependency.
 - The proxy sends `next` with the path and the query of the request. Keep
   secrets out of the query of a protected URL.
 - The session cookie is `DEFAULT_COOKIE_NAME` of `@authtempo/core/credentials`
-  (`__Host-tempo_session`). With that default, the proxy also reads the name
-  before plan 12b, for one release. Pass `cookieName` when core's config sets one.
+  (`__Host-tempo_session`). Until 0.2.0 the proxy also read the name before
+  plan 12b, `tempo_session`. It reads that name no more. Pass `cookieName`
+  when core's config sets one.
 - Next 16 renamed middleware to proxy. A file named `middleware.ts` gets a
   deprecation warning from Next.

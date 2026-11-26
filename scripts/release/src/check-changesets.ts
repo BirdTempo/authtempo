@@ -3,7 +3,14 @@ import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BREAKING, isBreaking, unreadBreaking } from "./check-pack.ts";
 import { parseChangeset } from "./lib/changeset-file.ts";
-import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
+import {
+  changedFiles,
+  commitCount,
+  commitsSince,
+  mergeBase,
+  NoMergeBase,
+  showAt,
+} from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { ROOT_INPUTS, type RootInput, rootInputOf } from "./lib/root-inputs.ts";
@@ -49,6 +56,13 @@ export interface ChangesetsInput {
   baseVersion?: string | null;
   /** Each file that rewrite-unpublished writes on the version branch, by its path from the root. */
   unpublished?: readonly string[];
+  /**
+   * On the version branch only: each released package whose CHANGELOG.md
+   * section of `version` holds an entry of a commit since the merge base
+   * (`versionedBy`). Such an entry is a changeset of this branch that
+   * `changeset version` consumed.
+   */
+  versioned?: readonly string[];
   /** The root inputs of the release. The default is ROOT_INPUTS. */
   rootInputs?: readonly RootInput[];
 }
@@ -315,6 +329,23 @@ export function checkChangesets(input: ChangesetsInput): Report {
     input.baseVersion !== null &&
     input.baseVersion !== input.version;
   const unpublished = new Set(versionStep ? (input.unpublished ?? []) : []);
+  // At a new minor, the runbook removes the code of each due item of the
+  // deprecation register on the version branch. The removal cannot merge
+  // before the version change: below `removeIn`, check-deprecations fails a
+  // marker that is gone. So the branch holds source changes, and `changeset
+  // version` has consumed their changesets. Release 0.2.0 was the first such
+  // branch, and without this rule it failed here with no way to pass. A
+  // consumed changeset is not lost: its entry is in the changelog section of
+  // the new version, beside the commit that added it. So on the version
+  // branch, a package with such an entry of a commit of this branch is named.
+  // An entry of a commit on main names nothing, as a changeset on main does.
+  if (versionStep) {
+    for (const name of input.versioned ?? [])
+      if (released.has(name)) {
+        named.add(name);
+        notes.push(`${name} has a changelog entry of this branch for ${input.version}`);
+      }
+  }
 
   let changed = 0;
   let covered = 0;
@@ -407,6 +438,41 @@ export function checkChangesets(input: ChangesetsInput): Report {
 
 const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/;
 
+/**
+ * The commit of each entry of the section `## <version>` of a Changesets
+ * changelog. The default changelog of `@changesets/cli` starts an entry with
+ * the short hash of the commit that added its changeset: `- 1a22e8a: text`.
+ * A line `- Updated dependencies [...]` is no entry of a changeset of the
+ * package, so it gives no commit.
+ */
+export function changelogCommits(changelog: string, version: string): string[] {
+  const lines = changelog.split(/\r?\n/);
+  const start = lines.indexOf(`## ${version}`);
+  if (start === -1) return [];
+  const commits: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("## ")) break;
+    const m = /^- ([0-9a-f]{7,40}): /.exec(line);
+    if (m?.[1] !== undefined) commits.push(m[1]);
+  }
+  return commits;
+}
+
+/**
+ * True when the changelog section of `version` holds an entry of one of
+ * `commits`, the full hashes of the commits of the branch. The entry holds a
+ * short hash, so a commit matches by its start.
+ */
+export function versionedBy(
+  changelog: string,
+  version: string,
+  commits: readonly string[],
+): boolean {
+  return changelogCommits(changelog, version).some((short) =>
+    commits.some((full) => full.startsWith(short)),
+  );
+}
+
 /** The `build` script of a manifest, or undefined. */
 function buildOf(manifest: Record<string, unknown>): string | undefined {
   const build = (manifest.scripts as Record<string, unknown> | undefined)?.build;
@@ -447,10 +513,17 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     baseManifest === null
       ? null
       : String((JSON.parse(baseManifest) as { version?: unknown }).version);
+  // The version branch: the packages with a changelog entry of a commit of this branch.
+  const branch = baseVersion !== null && baseVersion !== version ? commitsSince(root, base) : [];
+  const versioned = workspace
+    .filter((p) => released.includes(p.name))
+    .filter((p) => versionedBy(readHead(`${p.dir}/CHANGELOG.md`) ?? "", version, branch))
+    .map((p) => p.name);
   return {
     changed,
     changesets,
     released,
+    versioned,
     dirs: Object.fromEntries(workspace.map((p) => [p.name, p.dir])),
     files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
     builds: Object.fromEntries(workspace.map((p) => [p.name, buildOf(p.manifest)])),

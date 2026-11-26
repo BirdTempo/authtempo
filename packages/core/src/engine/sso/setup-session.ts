@@ -98,7 +98,7 @@ export async function openSetupSession(
   token: string,
   meta: SsoActMeta = {},
 ): Promise<Result<{ cookie: string; linkId: string }>> {
-  if (!config.sso || !config.sso.setup) return fail("not_found");
+  if (!config.sso?.setup) return fail("not_found");
   if (!(await limit(config, "setup-open:ip", ipKey(meta.ip ?? null), SETUP_OPEN_PER_IP))) {
     setupRefused(config, "open_ip_limit");
     return fail("rate_limited");

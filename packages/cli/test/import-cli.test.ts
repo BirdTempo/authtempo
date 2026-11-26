@@ -2,12 +2,13 @@ import { join } from "node:path";
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
 import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { ALIAS_LINES } from "../src/commands/import-alias.js";
+import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-counts.js";
 import { IMPORT_JSON_KEYS } from "../src/json.js";
-import { ALIAS, assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
+import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
 import { freshDatabase } from "./support/pg.js";
 
-// The two binaries as child processes on the docker compose Postgres (plan 11c).
+// `authtempo import` as a child process on the docker compose Postgres (plan
+// 11c). Each run here is a dry run, so the database holds no user at any time.
 const FIXTURES = join(PKG, "../import/test/fixtures");
 const FILES = [
   "--users",
@@ -46,19 +47,24 @@ const newRun = (extra: string[], url: string) =>
     },
   );
 
-it("prints the same report and exits with the same code from the alias and from authtempo import (spec 19)", () => {
-  const old = runBin(["supabase", ...FILES, "--postgres", db.url, "--dry-run"], { bin: ALIAS });
-  const neu = newRun([], db.url);
-  // The fixture holds two hashes that no format verifies: the first test of the alias suite.
-  expect(old.status).toBe(1);
-  expect(neu.status).toBe(old.status);
-  expect(neu.stdout).toBe(old.stdout);
-  expect(linesOf(old.stderr).slice(0, 2)).toEqual([ALIAS_LINES.renamed, ALIAS_LINES.postgres]);
-  // The fixture files of the repo are readable by other users, so the new
-  // command warns on each (plan 11f). The alias does not (its deviation 8).
-  const lines = linesOf(neu.stderr).filter((l) => !l.startsWith("warning: "));
+it("prints the report of a dry run, writes nothing, and no line holds the connection string (spec 19)", async () => {
+  const r = newRun([], db.url);
+  // The fixture holds two hashes that no format verifies.
+  expect(r.status, r.stderr).toBe(1);
+  const out = linesOf(r.stdout);
+  expect(out[0]).toBe("supabase (dry run, nothing written)");
+  const c = SUPABASE_FIXTURE_CREATED;
+  expect(out).toContain(
+    `created: user ${c.user}, identity ${c.identity}, password ${c.password}, passkey 0, organization 0, member 0`,
+  );
+  expect(out.filter((l) => l.startsWith("refused hash "))).toHaveLength(2);
+  // The fixture files of the repo are readable by other users, so the command
+  // warns on each (plan 11f).
+  const lines = linesOf(r.stderr).filter((l) => !l.startsWith("warning: "));
   expect(lines[0]).toMatch(/^connecting to \S+:\d+\/cli_/);
-  expect(neu.stdout + neu.stderr).not.toContain(db.url);
+  expect(r.stdout + r.stderr).not.toContain(db.url);
+  const rows = await db.sql<{ n: string }[]>`SELECT count(*)::text AS n FROM ta_user`;
+  expect(rows[0]?.n).toBe("0");
 });
 
 it("prints one JSON document with the report on --json, and the summary on stderr", () => {
@@ -92,13 +98,4 @@ it("names a refused login by its SQLSTATE and the host only: no line names the u
     `stopped: storage: 28P01 at ${host.hostname}:${host.port}${host.pathname}; nothing was written`,
   );
   expect(r.stdout + r.stderr).not.toContain("canary");
-});
-
-it("keeps the old usage text on a usage error of the alias", () => {
-  const r = runBin([], { bin: ALIAS });
-  expect(r.status).toBe(2);
-  expect(linesOf(r.stderr)[0]).toBe(ALIAS_LINES.renamed);
-  expect(r.stderr).toContain(
-    "authtempo-import <provider> [files] (--postgres <url> | --d1-bundle <file>) [options]",
-  );
 });

@@ -1,6 +1,6 @@
+import { base64Url, makePkce } from "@authtempo/client/oauth";
 import { describe, expect, it } from "vitest";
 import { expoCrypto, expoOpener } from "../src/expo.js";
-import { base64Url, makePkce } from "../src/pkce.js";
 
 describe("expoOpener", () => {
   it("opens the auth session with the redirect, never ephemeral, and maps the result", async () => {

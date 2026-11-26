@@ -16,7 +16,10 @@ const COOKIE = "__Host-tempo_session";
 
 type Step = { response: Response };
 
-function setup(core: { basePath?: string } = {}, gate: Partial<StartAuthOptions> = {}) {
+function setup(
+  core: { basePath?: string; lastMethod?: Record<string, never> } = {},
+  gate: Partial<StartAuthOptions> = {},
+) {
   const prefix = core.basePath ?? "/auth";
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
@@ -138,15 +141,15 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
   });
 
   it("passes every Set-Cookie line of core unchanged", async () => {
-    const { signIn } = setup();
-    // The old cookie name (plan 12b): core answers the session line and the clear of the old name.
-    const { cookie, lines, inner } = await signIn({ cookie: "tempo_session=ts_old" });
+    const { signIn } = setup({ lastMethod: {} });
+    // Two Set-Cookie lines of core in one answer: with `lastMethod` on, a browser sign-in
+    // sets the session cookie and the last method cookie. Until 0.2.0 this test got its
+    // second line from the clear of the old cookie `tempo_session`, which core reads no more.
+    const { cookie, lines, inner } = await signIn();
     expect(lines).toHaveLength(2);
     expect(lines).toEqual(inner?.headers.getSetCookie());
     expect(cookie.startsWith(`${COOKIE}=ts_`)).toBe(true);
-    expect(lines.some((l) => l.startsWith("tempo_session=;") && l.includes("Max-Age=0"))).toBe(
-      true,
-    );
+    expect(lines.some((l) => l.startsWith("__Host-tempo_last_method=magic_link;"))).toBe(true);
   });
 
   // A read of the session on a route of core would add a renewed cookie after

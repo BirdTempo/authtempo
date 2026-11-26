@@ -214,7 +214,7 @@ does the same write.
 Four entries hold the facts that an SDK reads, so each fact has one copy (plans 11d, 11g, and 12k).
 
 - `@authtempo/core/routes`: `ROUTES`, every route that core can serve, with literal types. `RoutePath<"GET">` is the type of a GET path that core serves, so a typo in an SDK's path fails its compile. It also exports `PROVIDER_NAME_RE` and `AUTH_ERROR_PARAM` (`auth_error`).
-- `@authtempo/core/credentials`: the prefixes `ts_` and `tk_`, the JWT `typ` values `JWT` and `at+jwt`, `DEFAULT_COOKIE_NAME` (`__Host-tempo_session`), `LEGACY_COOKIE_NAME` (`tempo_session`, read for one release), `readBearer`, `readSessionToken`, the compact JWS check on Web Crypto (`decodeJws`, `verifyJws`), and `resourceOf`, the rule that finds the resource a URL falls under.
+- `@authtempo/core/credentials`: the prefixes `ts_` and `tk_`, the JWT `typ` values `JWT` and `at+jwt`, `DEFAULT_COOKIE_NAME` (`__Host-tempo_session`), `readBearer`, `readSessionToken`, the compact JWS check on Web Crypto (`decodeJws`, `verifyJws`), and `resourceOf`, the rule that finds the resource a URL falls under.
 - `@authtempo/core/access`: the pure checks of permission statements (`can`, `union`, `intersect`, `isSubset`, `effectiveOf`, `roleHasPermission`, `statementFault`) and `CORE_STATEMENTS`. It imports nothing, so a browser bundle can use it. The server check decides; a client check only hides a control.
 - `@authtempo/core/openapi`: `openApiDocument(options)` builds the OpenAPI 3.1 document of the routes; `openApiOptionsFrom(config)` gives the options of a config, with only the features that it turns on. `openapi: true` serves the same document at `GET <basePath>/openapi.json`. The key is off by default.
 
@@ -1880,8 +1880,9 @@ writes each value under version 1.
 - One binding cookie per browser: a second social start, in another tab
   or for the other provider, replaces it, and the first flow then answers
   `invalid_token`. Start again.
-- The session cookie is `__Host-tempo_session` (plan 12b). For one
-  release core reads the old `tempo_session` and moves it. The binding
+- The session cookie is `__Host-tempo_session` (plan 12b). Until 0.2.0
+  core also read the old `tempo_session` and moved it. Core reads it no
+  more, so a browser that holds only the old cookie signs in again. The binding
   cookie is `__Secure-tempo_session_oauth` on the social path. The trust
   cookie is a plain host cookie.
 - `session.absoluteDays` (1 to 365, off by default) ends a session that

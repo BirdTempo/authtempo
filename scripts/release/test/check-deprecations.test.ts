@@ -410,6 +410,9 @@ describe("check-deprecations", () => {
   // removes the code of each due item and changes this test. Until then, this
   // test fails the evidence run, and release-check stops there (follow-up 9 of
   // plan 12j). runbook.test.ts holds this title.
+  // State of 0.2.0 (2026-11-26): the code of the three items is removed, so
+  // each item is due and each marker is gone. This test passes only at 0.2.0
+  // or later: the removal and the version change are one pull request.
   it("reads the real register", () => {
     const entries = readDeprecations(repo);
     expect(entries.map((e) => e.id)).toEqual([
@@ -422,7 +425,7 @@ describe("check-deprecations", () => {
       expect(e.removeIn, e.id).toBe("0.2.0");
     }
     const { lines, code } = entry(repo, undefined);
-    expect(lines[0]).toBe("check-deprecations: PASS items=3 live=3 due=0 failures=0");
+    expect(lines[0]).toBe("check-deprecations: PASS items=3 live=0 due=3 failures=0");
     expect(code).toBe(0);
     // The scan reads the shipped source and each README of packages/.
     const files = sourceFiles(repo);
@@ -435,9 +438,8 @@ describe("check-deprecations", () => {
         .map((m) => m.file),
     );
     expect(held.size).toBeGreaterThan(10);
-    expect(lines.at(-1)).toBe(
-      `  note: ${files.length} shipped files, ${held.size} with for one release`,
-    );
+    // Each due marker is gone, so no shipped file holds the words now.
+    expect(lines.at(-1)).toBe(`  note: ${files.length} shipped files, 0 with for one release`);
     expect(files).toContain("packages/core/src/http/cookies.ts");
     expect(files).toContain("packages/handoff/README.md");
     expect(files.some((f) => f.includes("/test/") || f.includes("/dist/"))).toBe(false);
@@ -491,12 +493,15 @@ describe("check-deprecations", () => {
         oldCookieReads(readFileSync(join(src, f), "utf8")).map((line) => `${f}: ${line.trim()}`),
       );
       expect(left).toEqual([]);
-      // The detection finds each read of the real source, so an empty list is not a blind scan.
+      // Until 0.2.0 the real source held four reads: one in http/routes/sessions.ts, one in
+      // http/router.ts, and two in primitives/credentials.ts. 0.2.0 removed their code, so
+      // the real source holds none. The describe below proves on fixed lines that the
+      // detection finds a read, so an empty list is not a blind scan.
       const real = (f: string) =>
         oldCookieReads(readFileSync(join(repo, "packages/core/src", f), "utf8"));
-      expect(real("http/routes/sessions.ts")).toHaveLength(1);
-      expect(real("http/router.ts")).toHaveLength(1);
-      expect(real("primitives/credentials.ts")).toHaveLength(2);
+      expect(real("http/routes/sessions.ts")).toEqual([]);
+      expect(real("http/router.ts")).toEqual([]);
+      expect(real("primitives/credentials.ts")).toEqual([]);
       // The constant stays: the Expo storage key of the compat client reads it.
       expect(readFileSync(join(src, "http/cookies.ts"), "utf8")).toContain(
         'export const LEGACY_SESSION_COOKIE = "tempo_session";',

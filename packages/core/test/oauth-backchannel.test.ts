@@ -234,21 +234,6 @@ const FLOWS: Flow[] = [
     run: (w, actor) => w.api.signOut(actor.token),
   },
   {
-    // The cookie move of plan 12b: a sign-out also ends the session of the old cookie name.
-    name: "a sign-out of the old cookie name",
-    target: "other",
-    run: (w, actor, other) =>
-      w.handle(
-        post(
-          "/auth/sign-out",
-          {},
-          {
-            cookie: `${cookieOf(w, actor.token)}; ${w.auth.config.legacyCookieName}=${other.token}`,
-          },
-        ),
-      ),
-  },
-  {
     name: "the first email second-factor enable",
     target: "other",
     async run(w, actor) {

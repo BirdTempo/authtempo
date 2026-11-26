@@ -4,11 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import { LIVE_PER_SESSION, signToken } from "../src/engine/jwt.js";
 import { createSession, destroySession } from "../src/engine/sessions.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
-import {
-  ACCESS_TOKEN_TYPE,
-  DEFAULT_COOKIE_NAME,
-  LEGACY_COOKIE_NAME,
-} from "../src/primitives/credentials.js";
+import { ACCESS_TOKEN_TYPE, DEFAULT_COOKIE_NAME } from "../src/primitives/credentials.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
 
@@ -90,7 +86,8 @@ describe("POST /token/live (plan 11d)", () => {
       live(null),
       live(s.sessionToken),
       live(null, { cookie: `${DEFAULT_COOKIE_NAME}=${s.sessionToken}` }),
-      live(null, { cookie: `${LEGACY_COOKIE_NAME}=${s.sessionToken}` }),
+      // The old cookie name, which core reads no more (0.2.0).
+      live(null, { cookie: `tempo_session=${s.sessionToken}` }),
       live("not-a-token"),
       live(changed),
       live(access),

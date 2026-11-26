@@ -4,7 +4,6 @@ description: Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognit
 type: reference
 sources:
   - packages/cli/README.md "import"
-  - packages/cli/README.md "The alias authtempo-import"
   - packages/import/README.md "The exit status and the report"
   - packages/import/README.md "Targets"
 sidebar:
@@ -13,7 +12,7 @@ sidebar:
 
 **For:** an operator who moves the users of another system into authtempo.
 
-**What it does:** `authtempo import` reads an export of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS. It writes only the rows that a core flow writes. This page lists its flags and the old flags of `authtempo-import`.
+**What it does:** `authtempo import` reads an export of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS. It writes only the rows that a core flow writes. This page lists its flags, and the new form of each flag of the old binary `authtempo-import`.
 
 ## Before you start
 
@@ -84,7 +83,9 @@ authtempo import workos --users users.json --identities identities.json --member
 
 ## The old flags
 
-| `authtempo-import` | `authtempo import` |
+Release 0.2.0 removes the old binary `authtempo-import`, and `authtempo import` replaces it. This table gives the new form of each old flag.
+
+| Old flag | New form |
 | --- | --- |
 | `--postgres <url>` | `--target postgres` with `--url-env <NAME>` or `--url-file <path>` |
 | `--better-auth` | `--tables compat` |
@@ -94,10 +95,7 @@ authtempo import workos --users users.json --identities identities.json --member
 
 `--tables` now names the table set, `core` or `compat`. Every other flag keeps its name and its meaning.
 
-## The alias
-
-- `authtempo-import` stays for one release with its old flags. It prints one deprecation line on stderr.
-- With `--postgres`, it prints a second line. A connection string on the command line goes into the shell history.
+A run with `--postgres`, `--better-auth`, `--d1-bundle`, or `--firebase-signer-key` stops with a usage error. The error gives the new form.
 
 :::caution
 Warning: do not give a format that the app's seam does not verify. The import then writes those hashes, reports no refusal, and exits 0. Each of those users then fails every password sign-in.

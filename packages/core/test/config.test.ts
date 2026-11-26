@@ -34,7 +34,8 @@ describe("resolveConfig", () => {
     const c = resolveConfig(base);
     expect(c.basePath).toBe("/auth");
     expect(c.cookieName).toBe("__Host-tempo_session");
-    expect(c.legacyCookieName).toBe("tempo_session");
+    // 0.2.0 removed the read of the old cookie, and with it this key.
+    expect("legacyCookieName" in c).toBe(false);
     expect(c.session).toEqual({
       ttlDays: 30,
       slidingRefreshDays: 7,

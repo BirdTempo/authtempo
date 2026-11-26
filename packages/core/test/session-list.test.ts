@@ -319,28 +319,26 @@ describe("the revoke of one session (plan 12a)", () => {
     expect(await resolveSession(auth.config, me.token)).toBeNull();
   });
 
-  it("ends and clears the old cookie name when the caller revokes its own session with both names", async () => {
+  it("clears the session cookie only when the caller revokes its own session beside an old cookie", async () => {
     const auth = totpAuth();
     const a = await verifiedSession(auth);
     const b = await verifiedSession(auth, EMAIL, "2.2.2.2");
-    const legacy = auth.config.legacyCookieName;
-    if (legacy === null) throw new Error("no old cookie name");
     const handle = createRouter(auth.config, coreRoutes(auth.config));
     const res = await handle(
       post(
         "/auth/sessions/revoke",
         { id: a.session.id },
-        { cookie: `${auth.config.cookieName}=${a.token}; ${legacy}=${b.token}` },
+        { cookie: `${auth.config.cookieName}=${a.token}; tempo_session=${b.token}` },
       ),
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, current: true });
-    // startsWith: a toContain of "tempo_session=;" also matches the new name.
-    expect(res.headers.getSetCookie().some((c) => c.startsWith(`${legacy}=;`))).toBe(true);
-    // As the sign-out does: the old token's session ends too (review M1).
-    expect((await handle(get("/auth/session", { cookie: `${legacy}=${b.token}` }))).status).toBe(
-      401,
-    );
+    // startsWith: the text "tempo_session=" is also a part of the new name.
+    expect(res.headers.getSetCookie().some((c) => c.startsWith("tempo_session="))).toBe(false);
+    // Core reads the old name no more (0.2.0), so the old cookie alone is no session.
+    expect(
+      (await handle(get("/auth/session", { cookie: `tempo_session=${b.token}` }))).status,
+    ).toBe(401);
   });
 
   it("clears no cookie when the caller revokes another session", async () => {

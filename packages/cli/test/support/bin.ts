@@ -18,7 +18,6 @@ import { fileURLToPath } from "node:url";
 export const PKG = fileURLToPath(new URL("../../", import.meta.url));
 export const REPO = join(PKG, "../../");
 export const BIN = join(PKG, "dist/bin/authtempo.js");
-export const ALIAS = join(PKG, "dist/bin/authtempo-import.js");
 /**
  * The version of each package by its folder under packages/, from its
  * package.json. A test reads the version of the package under test here,

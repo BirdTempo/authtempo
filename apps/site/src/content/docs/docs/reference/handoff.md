@@ -30,7 +30,7 @@ sources:
 | `redirect` | required | `<scheme>auth` for a scheme of the API's `handoff.schemes`, or a development URL that `devRedirectPattern` admits. A redirect with `#` is refused. |
 | `opener` | required | The browser side, a `HandoffOpener`. |
 | `fetch` | `globalThis.fetch` | The fetch of the redeem. |
-| `crypto` | `webCrypto()` | The crypto seam, a `HandoffCrypto`. Hermes needs `expoCrypto`. |
+| `crypto` | `webCrypto()` | The crypto seam, a `PkceCrypto` of [the OAuth client entry](/docs/reference/client-oauth/). Hermes needs `expoCrypto`. |
 
 - `signIn()` answers a `HandoffResult`: `{ ok: true, value }` with a `HandoffSession` of `{ token, user, session }`, or a `HandoffFailure`.
 - `signIn()` is single flight. A second call while one runs gets the result of the first, and the opener runs once.
@@ -38,9 +38,6 @@ sources:
 
 The other exports of the entry:
 
-- `makePkce` makes the verifier and the challenge.
-- `parseReturnedUrl` reads the code of a `Returned` URL.
-- `base64Url` is the codec of the verifier.
 - `HandoffCode` and `Handoff` are types.
 
 ## The opener contract
@@ -101,7 +98,7 @@ A `TokenStore` has `get`, `set`, and `clear`. On Electron, `createTokenStore` an
 
 | Entry | Exports |
 | --- | --- |
-| `@authtempo/handoff` | `createHandoff`, `Handoff`, `HandoffOptions`, `HandoffOpener`, `HandoffResult`, `HandoffSession`, `HandoffFailure`, `HandoffCode`, `makePkce`, `webCrypto`, `base64Url`, `HandoffCrypto`, `parseReturnedUrl`, `Returned`, `HANDOFF_CALLS`, `createNativeClient`, `NativeClient`, `NativeClientOptions`, `TokenStore` |
+| `@authtempo/handoff` | `createHandoff`, `Handoff`, `HandoffOptions`, `HandoffOpener`, `HandoffResult`, `HandoffSession`, `HandoffFailure`, `HandoffCode`, `HANDOFF_CALLS`, `createNativeClient`, `NativeClient`, `NativeClientOptions`, `TokenStore` |
 
 ### The Expo entry
 
@@ -117,7 +114,7 @@ A `TokenStore` has `get`, `set`, and `clear`. On Electron, `createTokenStore` an
 
 `HANDOFF_CALLS` is the table of the route that the handoff builds a URL for: `GET /handoff/start`, which the system browser opens. The redeem is the call `handoff.redeem` of the client.
 
-`makePkce`, `webCrypto`, `base64Url`, `parseReturnedUrl`, and `Returned` live in [the OAuth client entry](/docs/reference/client-oauth/). `HandoffCrypto` is its `PkceCrypto`. This package re-exports them for one release.
+`makePkce`, `webCrypto`, `base64Url`, `parseReturnedUrl`, `PkceCrypto`, and `Returned` live in [the OAuth client entry](/docs/reference/client-oauth/). Until 0.2.0 this package exported them too, with `PkceCrypto` under the name `HandoffCrypto`.
 
 ## Failure codes
 

@@ -102,6 +102,14 @@ export function commitCount(root: string, base: string): number {
   return Number(git(root, ["rev-list", "--count", `${base}..HEAD`]).trim());
 }
 
+/** The full hash of each commit on HEAD since `base`. */
+export function commitsSince(root: string, base: string): string[] {
+  return git(root, ["rev-list", `${base}..HEAD`])
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
 /** Each file path in the tree of `ref`, sorted. */
 export function filesAt(root: string, ref: string): string[] {
   return git(root, ["ls-tree", "-r", "--name-only", "-z", ref])

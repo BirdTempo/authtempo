@@ -8,7 +8,7 @@ sources:
 
 **For:** a reader who follows an older link to the import CLI.
 
-**What it does:** this page points to `authtempo import`, which replaces `authtempo-import`.
+**What it does:** this page points to `authtempo import`. Release 0.2.0 removes the old binary `authtempo-import`, and `authtempo import` replaces it.
 
 ## Before you start
 

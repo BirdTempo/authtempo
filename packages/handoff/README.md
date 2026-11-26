@@ -47,8 +47,9 @@ the result of the first call, and the opener runs once. `startUrl(challenge)` re
 the browser themselves.
 
 PKCE and the parser of the returned URL live in `@authtempo/client/oauth`
-(plan 11d). This package re-exports `makePkce`, `webCrypto`, `base64Url`,
-`parseReturnedUrl`, and the type `HandoffCrypto` for one release.
+(plan 11d). Import `makePkce`, `webCrypto`, `base64Url`, `parseReturnedUrl`,
+and the types `PkceCrypto` and `Returned` from that entry. Until 0.2.0 this
+package exported them too, with `PkceCrypto` under the name `HandoffCrypto`.
 
 ## The opener contract
 

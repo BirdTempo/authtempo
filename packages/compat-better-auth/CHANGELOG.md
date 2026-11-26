@@ -1,5 +1,93 @@
 # @authtempo/compat-better-auth
 
+## 0.2.0
+
+### Minor Changes
+
+- d2be91f: Compat migration 0014 serves core's schema version 17. It adds `ta_sso_setup_link`, `ta_sso_test_run`, and `ta_sso_setup_session`. It adds `draft` (default false), `version` (default 1), and `setup_link_id` to `ta_sso_connection`, `setup_link_id` to `ta_sso_domain`, and `pending` (default false) and `setup_link_id` to `ta_scim_token`. It changes no row. The text names `ta_` tables only, so it is the same for every naming. The new export is `compatMigration0014Sql`.
+  
+  Apply 0014 before you deploy core at version 17.
+  
+  The CLI knows schema version 17 and compat version 14. `authtempo migrate --target d1 --tables compat` copies 0014, and `authtempo generate` writes the three new models.
+- c657924: Compat migration 0015 serves core's schema version 18. It adds `organization_id` to `ta_operator_audit`. It adds `certificate_ends_at`, `expiry_stage`, `expiry_notice_at`, `last_success_at`, `last_failure_at`, and `last_failure_step` to `ta_sso_connection`. It adds `expiry_stage` and `expiry_notice_at` to `ta_scim_token` and `ta_sso_setup_link`. Each new column is nullable with no default, and the migration changes no row. The text names `ta_` tables only, so it is the same for every naming. The new export is `compatMigration0015Sql`.
+  
+  Apply 0015 before you deploy core at version 18.
+  
+  The shim refuses a Better Auth `ac` resource named `audit`, as it refuses `apiToken`. Core 18 owns `audit`, the organization audit. Give the app's resource another name. Core ignores the `audit` key of each stored row of `organizationRole.permission`, so an old dynamic role grants no `audit:read`. A role create or update that names `audit` answers `INVALID_RESOURCE`.
+  
+  The role `owner` now holds core's `audit:read`, as core's owner rank does. So an owner reads `GET /organizations/audit`, and each other role gets `forbidden_rank`. A role statement that names `audit` is refused at start.
+  
+  The CLI knows schema version 18 and compat version 15. `authtempo migrate --target d1 --tables compat` copies 0015, and `authtempo generate` writes the new columns.
+- 1a22e8a: Breaking: core reads the old session cookie `tempo_session` no more, and the router does not move it.
+  
+  Version 0.1 read `tempo_session` when a request had no `__Host-tempo_session`, and moved the token to the new name. That read is gone. A browser that holds only the old cookie signs in again. The Better Auth shim and the proxy of `@authtempo/next` read the old name no more.
+  
+  `@authtempo/core/credentials` no longer exports `LEGACY_COOKIE_NAME`. `sessionCookieNames()` answers `{ cookieName }` only, and `readSessionToken` reads no `legacyCookieName`. The resolved config has no `legacyCookieName`.
+  
+  A sign-out clears the session cookie only. `LEGACY_SESSION_COOKIE` stays: the config refuses that name for each other cookie of core, and the Expo storage key of the shim holds it.
+- f6ce98f: The peer range of `postgres` is now `^3.4.9 || ^4.1.1`. An app can bring postgres.js 4.1.1 or later. The tests of both packages run on 3.4.9 and on 4.1.1.
+  
+  Versions 4.0.0 and 4.1.0 are outside the range. 4.1.0 sends a query through Hyperdrive that never answers. Before 4.1.1, a late statement of `sql.begin` can write after a rollback.
+  
+  Each function of the adapter now takes a `PostgresClient`, a type of the adapter that names only the calls it makes. The `Sql` types of the two majors do not fit each other, and the client of each major fits this type. The compat storage takes the same type.
+  
+  The Worker example for Postgres uses 4.1.1 and has a test that runs it in workerd. No test runs the Hyperdrive service yet.
+  
+  `authtempo init --stack workers-postgres` copies that example. So a new app of that stack gets `postgres` 4.1.1 and the workerd test. The CLI itself still connects with 3.4.9.
+  
+  Major 4 of postgres.js changes how the driver types a parameter. Read its upgrade guide for your own queries on the same client.
+
+### Patch Changes
+
+- e386ff8: The expiry notice reads the owners of an organization of exactly 100 members in full. Before, the sweep wrote a false `notice.mail_failed` with a `RangeError` for such an organization. A member or invitation act in an impersonation now writes the operator as the actor, with `data.platform: true`. This applies to the core routes and to `auth.api.cancelInvitation` of the Better Auth compat layer. The organization audit shows such an act as `platform`, with no IP and no user agent. Before, a core route showed the IP and the user agent of the operator as an act of the member. The compat cancel named the member as the actor. `auth.api.revokeInvitation` takes a new `session` option: the session of the caller, which picks the audit actor only and changes no other step. `auth.api.inviteMember` takes a new `session` option too: a session of an impersonation gets `impersonation_session` with status 403, as `POST /organizations/invite` answers it. `auth.api.createInvitation` of the compat layer passes the session, so it refuses an impersonation with the code `FORBIDDEN` and writes nothing.
+- 227d5c6: The in-process token writes now refuse a session of an impersonation, as their routes do. `auth.api.tokens.create` and `auth.api.tokens.update`, and `auth.api.organizationTokens.create`, `update`, and `revoke`, answer `impersonation_session` with status 403 for such a session. They make no token, change no token, and write no audit row. Before, an operator who acted as a member could make a token that outlived the impersonation. The organization audit then named the member as the actor. `auth.api.organizationTokens.revoke` takes a new `session` option. In the Better Auth compat layer, `createApiKey` and `updateApiKey` pass the session of the headers, for a user key and for an organization key. `deleteApiKey` passes it for an organization key. So these calls refuse an impersonation with the code `FORBIDDEN`. `deleteApiKey` of a user key does not refuse an impersonation, as its core route does not. `updateApiKey` of each key, and `deleteApiKey` of an organization key, now also use the session proof rule of plan 12p, as the routes do. So a session from before the proof of its address gets `email_unverified`. A server call that names `userId` and has no headers works as before.
+- ee41ba3: The new config block `limits` changes two rules of the rate limits. Without it, each limit works as before.
+  
+  `limits.windows` gives a limit family another window, such as `"otp:email": { max: 5 }`. `max` is from 1 to 100000, and `seconds` is from 1 to 86400. Core refuses an unknown family at the start. It also refuses the six families whose window comes from another setting. A higher `max` lets a caller try more.
+  
+  `limits.noClientIp: "refuse"` ends the shared count of the requests with no client IP. `handle` answers 403 `client_ip_missing` to such a request before any route. An in-process call of `auth.api` with `ip: null` throws at its first per-IP limit.
+  
+  The client has a text for the new code `client_ip_missing`. The compat error map names it.
+- 04792aa: Add `POST /sessions/revoke-all`, `api.session.revokeAll`, and `client.sessions.revokeAll()`. The call ends every session of the user, the caller's own too, in one transaction. It also ends the second-factor challenges and the handoff codes. The trusted devices, the API tokens, and the OAuth grants stay, as with `POST /sessions/revoke-others`. The call needs a fresh session, and it shares the limit key `session-revoke:user` with the two other revoke routes. The answer is `{ ended }`, the count of ended sessions with the caller's own, and the route clears the session cookie. A session JWT of an ended session lives to its `exp`.
+  
+  `POST /revoke-sessions` and `auth.api.revokeSessions` of the Better Auth compat layer now use this one call. Before, they ended the other sessions and then the caller's session in two calls. A failure of the second call left the caller signed in.
+- d64537a: The TOTP setup takes an email code in place of the password. `POST /totp/setup` takes `{ password }` or `{ emailCode }`, exactly one. The code is the code of `POST /reauth/email`, and a right code is spent. `api.totp.setup` takes `{ session, password }` or `{ session, emailCode, ip }`, and `client.totp.setup` takes `{ password }` or `{ emailCode }`. A wrong code answers `invalid_code`, the spent guesses of a code answer `too_many_attempts`, and both write no row. Each try counts on `totp-setup:user`, 5 per 15 minutes, as before.
+  
+  `totp` no longer needs `password`. With no `password`, the factor stays off by default, so an upgrade turns nothing on. Set `totp: {}` to turn it on: the gate then covers the magic link, the email code, and social, and the setup takes the email code. A config with `totp` and neither `password` nor `emailOtp` is refused at start with a new message. A session alone still sets up no factor: the thief of a session does not read the owner's mailbox.
+  
+  A proof that the deployment lacks answers `not_found` and counts no try: `password` with no `password` config, and `emailCode` with `emailOtp: false`. The passkey method and the email method still take the password.
+  
+  The Better Auth compat layer still refuses `allowPasswordless: true`. Its refusal text changes: core asks for a proof at every change of the factor, and a session alone is no proof.
+- Updated dependencies [c79bf6c]
+- Updated dependencies [996480b]
+- Updated dependencies [45bcab6]
+- Updated dependencies [41ad872]
+- Updated dependencies [d182103]
+- Updated dependencies [e386ff8]
+- Updated dependencies [227d5c6]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [b456151]
+- Updated dependencies [bc4768d]
+- Updated dependencies [8b3ccc6]
+- Updated dependencies [2c2dcbd]
+- Updated dependencies [7aa0599]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [5a0384d]
+- Updated dependencies [1b83f8c]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [f6ce98f]
+- Updated dependencies [01e1b69]
+- Updated dependencies [35325a9]
+- Updated dependencies [4d41f15]
+  - @authtempo/core@0.2.0
+  - @authtempo/adapter-d1@0.2.0
+  - @authtempo/adapter-postgres@0.2.0
+  - @authtempo/adapter-sqlite@0.2.0
+  - @authtempo/client@0.2.0
+  - @authtempo/handoff@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

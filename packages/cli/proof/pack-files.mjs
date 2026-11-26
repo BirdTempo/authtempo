@@ -36,7 +36,6 @@ const NEEDED = [
   "dist/index.js",
   "dist/main.js",
   "dist/bin/authtempo.js",
-  "dist/bin/authtempo-import.js",
   "dist/templates.json",
   // Each target of the exports map, so a build that drops an entry file fails
   // here (ruling 21 of the plan 11b lane). The map is the one source.

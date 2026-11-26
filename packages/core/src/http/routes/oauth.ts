@@ -63,12 +63,7 @@ import {
   tokenLimited,
   userinfoClaims,
 } from "../../engine/oauth-token.js";
-import {
-  readBearer,
-  readSessionToken,
-  renewedSessionCookie,
-  sessionFromRequest,
-} from "../../engine/sessions.js";
+import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
@@ -641,9 +636,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
             status: 200,
             headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
           });
-    return ended
-      ? clearSessionCookies(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), res)
-      : res;
+    return ended ? clearSessionCookies(ctx.config, res) : res;
   };
   routes.push(
     {

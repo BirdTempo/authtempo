@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseReturnedUrl } from "../src/redirect.js";
+import { parseReturnedUrl } from "../src/oauth/returned-url.js";
 
 describe("parseReturnedUrl", () => {
   it("accepts the redirect with a query, and a dev redirect that already has one", () => {

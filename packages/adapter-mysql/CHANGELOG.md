@@ -1,5 +1,44 @@
 # @authtempo/adapter-mysql
 
+## 0.2.0
+
+### Minor Changes
+
+- c79bf6c: Breaking: schema version 17 adds the enterprise setup. The new models are `ssoSetupLink`, `ssoTestRun`, and `ssoSetupSession`. `ssoConnection` gets `draft`, `version`, and `setupLinkId`. `ssoDomain` gets `setupLinkId`. `scimToken` gets `pending` and `setupLinkId`. A storage adapter of your own stores these models and fields, and the conformance suite holds them.
+  
+  Apply `0017_schema_v17` on D1, SQLite, and Postgres, or `0005_schema_v17` on MySQL, before you deploy core at version 17. Each adapter refuses a database at version 16.
+  
+  The migration adds columns and tables and changes no row. `draft` and `pending` have the default false, and `version` has the default 1. So a connection of version 16 reads as no draft at version 1, and a token of version 16 reads as not pending.
+- 996480b: Breaking: schema version 18 adds the organization audit and the expiry notices. `operatorAudit` gets `organizationId`. `ssoConnection` gets `certificateEndsAt`, `expiryStage`, `expiryNoticeAt`, `lastSuccessAt`, `lastFailureAt`, and `lastFailureStep`. `scimToken` and `ssoSetupLink` get `expiryStage` and `expiryNoticeAt`. A storage adapter of your own stores these fields, and the conformance suite holds them.
+  
+  Apply `0018_schema_v18` on D1, SQLite, and Postgres, or `0006_schema_v18` on MySQL, before you deploy core at version 18. Each adapter refuses a database at version 17.
+  
+  The migration adds nullable columns with no default, and four indexes. It changes no row. A row of version 17 reads null in each new field. An audit row from before version 18 keeps a null `organizationId`, so the organization audit does not show it.
+  
+  On Postgres, the file runs in one transaction. Reads and writes of the four tables wait until it commits, also the SSO sign-ins. The time grows with the size of `ta_operator_audit`, so run it in a quiet window. On MySQL, each column add is INSTANT, and each index is built in place while writes go on.
+
+### Patch Changes
+
+- Updated dependencies [c79bf6c]
+- Updated dependencies [d182103]
+- Updated dependencies [e386ff8]
+- Updated dependencies [227d5c6]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [b456151]
+- Updated dependencies [bc4768d]
+- Updated dependencies [8b3ccc6]
+- Updated dependencies [2c2dcbd]
+- Updated dependencies [7aa0599]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [5a0384d]
+- Updated dependencies [1b83f8c]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [01e1b69]
+- Updated dependencies [35325a9]
+- Updated dependencies [4d41f15]
+  - @authtempo/core@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

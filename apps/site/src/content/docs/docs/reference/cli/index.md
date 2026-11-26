@@ -46,7 +46,6 @@ node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 | `authtempo check` | Checks that a deployment answers as core promises. | [authtempo check](/docs/reference/cli/check/) |
 | `authtempo keys rotate` | Makes a new signing key through the operator route. | [authtempo keys rotate](/docs/reference/cli/keys/) |
 | `authtempo mcp` | Adds the authtempo MCP server to the config of an editor in this project. | [authtempo mcp](/docs/reference/cli/mcp/) |
-| `authtempo-import` | The old import binary. It stays for one release. | [authtempo import](/docs/reference/cli/import/) |
 | `authtempo secret` | Makes an app secret or an operator secret from 32 random bytes. | [authtempo secret](/docs/reference/cli/secret/) |
 | `authtempo secret status`, `authtempo secret rewrap` | Counts and reseals the rows of each app secret version through the operator routes. | [authtempo secret status](/docs/reference/cli/secret-status/), [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) |
 | `authtempo info` | Prints a support report with no secret value. | [authtempo info](/docs/reference/cli/info/) |

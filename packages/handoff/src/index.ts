@@ -14,6 +14,4 @@ export {
   type NativeClient,
   type NativeClientOptions,
 } from "./native-client.js";
-export { base64Url, type HandoffCrypto, makePkce, webCrypto } from "./pkce.js";
-export { parseReturnedUrl, type Returned } from "./redirect.js";
 export type { TokenStore } from "./token-store.js";

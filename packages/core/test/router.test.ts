@@ -254,7 +254,7 @@ describe("router", () => {
     expect(await foreign.json()).toEqual({ error: "origin_not_trusted" });
     expect(ROUTER_CODES).toEqual(["not_found", "origin_not_trusted", "internal"]);
   });
-  it("answers internal with one log line when the legacy cookie move throws", async () => {
+  it("reads no store for the old cookie tempo_session: a store that is down does not fail the request", async () => {
     const down = resolveConfig({
       baseURL: "https://api.example.com",
       secret: "0123456789abcdef0123456789abcdef",
@@ -279,12 +279,11 @@ describe("router", () => {
         },
       }),
     );
-    expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: "internal" });
-    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    // Until 0.2.0 the cookie move read the session row of the old cookie after each
+    // handler, so this request answered 500. Core reads the old cookie no more.
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([]);
     expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls[0]?.[0]).toBe("authtempo: unhandled error");
+    expect(log).not.toHaveBeenCalled();
   });
 });

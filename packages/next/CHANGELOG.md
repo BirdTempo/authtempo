@@ -1,5 +1,39 @@
 # @authtempo/next
 
+## 0.2.0
+
+### Minor Changes
+
+- 1a22e8a: Breaking: core reads the old session cookie `tempo_session` no more, and the router does not move it.
+  
+  Version 0.1 read `tempo_session` when a request had no `__Host-tempo_session`, and moved the token to the new name. That read is gone. A browser that holds only the old cookie signs in again. The Better Auth shim and the proxy of `@authtempo/next` read the old name no more.
+  
+  `@authtempo/core/credentials` no longer exports `LEGACY_COOKIE_NAME`. `sessionCookieNames()` answers `{ cookieName }` only, and `readSessionToken` reads no `legacyCookieName`. The resolved config has no `legacyCookieName`.
+  
+  A sign-out clears the session cookie only. `LEGACY_SESSION_COOKIE` stays: the config refuses that name for each other cookie of core, and the Expo storage key of the shim holds it.
+
+### Patch Changes
+
+- Updated dependencies [c79bf6c]
+- Updated dependencies [d182103]
+- Updated dependencies [e386ff8]
+- Updated dependencies [227d5c6]
+- Updated dependencies [ee41ba3]
+- Updated dependencies [b456151]
+- Updated dependencies [bc4768d]
+- Updated dependencies [8b3ccc6]
+- Updated dependencies [2c2dcbd]
+- Updated dependencies [7aa0599]
+- Updated dependencies [1a22e8a]
+- Updated dependencies [5a0384d]
+- Updated dependencies [1b83f8c]
+- Updated dependencies [04792aa]
+- Updated dependencies [d64537a]
+- Updated dependencies [01e1b69]
+- Updated dependencies [35325a9]
+- Updated dependencies [4d41f15]
+  - @authtempo/core@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

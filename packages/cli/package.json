@@ -1,12 +1,11 @@
 {
   "name": "@authtempo/cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "The authtempo command line: init, migrate, import, check, and keys rotate.",
   "bin": {
-    "authtempo": "./dist/bin/authtempo.js",
-    "authtempo-import": "./dist/bin/authtempo-import.js"
+    "authtempo": "./dist/bin/authtempo.js"
   },
   "exports": {
     ".": {

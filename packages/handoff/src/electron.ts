@@ -1,7 +1,8 @@
 // Shapes checked against the electron docs on 2026-10-09 (electron 44.7.0): app open-url (with event.preventDefault),
 // app second-instance, app.requestSingleInstanceLock, shell.openExternal, and safeStorage (isEncryptionAvailable, getSelectedStorageBackend).
+
+import { parseReturnedUrl } from "@authtempo/client/oauth";
 import type { HandoffOpener } from "./handoff.js";
-import { parseReturnedUrl } from "./redirect.js";
 import type { TokenStore } from "./token-store.js";
 
 export type { TokenStore } from "./token-store.js";

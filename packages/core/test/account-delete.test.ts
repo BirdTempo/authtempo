@@ -42,7 +42,7 @@ import type { StorageAdapter } from "../src/storage/port.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { d1Like } from "./d1-like.js";
-import { post, sessionFor, tokenFromMail } from "./helpers.js";
+import { get, post, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -1077,25 +1077,24 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     ]);
   });
 
-  it("clears the legacy cookie name too, and ends its session", async () => {
+  it("clears the session cookie only: core reads the old name tempo_session no more (0.2.0)", async () => {
     const w = world();
-    const legacy = w.auth.config.legacyCookieName;
-    if (legacy === null) throw new Error("the default name has a legacy name");
     const me = await verifiedSession(w.auth);
     const other = await verifiedSession(w.auth, "bob@example.com");
     const res = await w.handle(
       post(
         "/auth/user/delete",
         {},
-        { cookie: `${w.auth.config.cookieName}=${me.token}; ${legacy}=${other.token}` },
+        { cookie: `${w.auth.config.cookieName}=${me.token}; tempo_session=${other.token}` },
       ),
     );
     expect(res.status).toBe(200);
     expect(res.headers.getSetCookie().map((c) => c.split(";")[0])).toEqual([
       `${w.auth.config.cookieName}=`,
-      `${legacy}=`,
     ]);
-    expect(await resolveSession(w.auth.config, other.token)).toBeNull();
+    // The old cookie alone is no session, so it is no way back in.
+    const next = await w.handle(get("/auth/session", { cookie: `tempo_session=${other.token}` }));
+    expect(next.status).toBe(401);
   });
 
   it("answers each error row of the route, with the renewed cookie on a refusal", async () => {

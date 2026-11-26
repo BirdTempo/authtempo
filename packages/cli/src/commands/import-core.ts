@@ -21,8 +21,8 @@ import { Stop } from "../errors.js";
 import { storageFailure } from "../seams/postgres.js";
 
 // The parse checks and the run of the import CLI, moved from
-// packages/import/src/cli.ts by plan 11c with no change of behavior. The
-// alias (import-alias.ts) and `authtempo import` (import.ts) both call them.
+// packages/import/src/cli.ts by plan 11c with no change of behavior.
+// `authtempo import` (import.ts) calls them.
 
 /** The io of the import. Tests pass a memory adapter through openStorage. */
 export interface CliIo {
@@ -61,7 +61,10 @@ const FLAG_PROVIDER = {
   "same-passkey-rp-id": "authjs",
 } as const satisfies Record<string, SourceName>;
 
-/** The values of the import flags by their old names: the alias's parser writes them as they are. */
+/**
+ * The values of the import flags by the names of the first import CLI.
+ * `authtempo import` (import.ts) maps its flags onto these names.
+ */
 export interface ImportValues {
   users?: string | undefined;
   identities?: string | undefined;
@@ -80,7 +83,7 @@ export interface ImportValues {
   postgres?: string | undefined;
   "better-auth"?: boolean | undefined;
   "d1-bundle"?: string | undefined;
-  /** `authtempo import --target memory` only: the alias has no such flag. */
+  /** `authtempo import --target memory`: a plan against an empty store. */
   memory?: boolean | undefined;
   /** `authtempo import verify` only (spec 23 item 7): the dry run, then the verify line and its exit status. */
   verify?: boolean | undefined;
@@ -111,7 +114,7 @@ function list(v: string | undefined, flag: string): string[] | undefined {
 /**
  * Every check of the import flags, then the read of the input files. A
  * message names a flag through `display`, so `authtempo import` names its
- * own flags (`--authjs-tables` for `tables`); the alias passes none.
+ * own flags (`--authjs-tables` for `tables`).
  */
 export function parseImportValues(
   positionals: readonly string[],
@@ -123,19 +126,13 @@ export function parseImportValues(
   if (!provider || positionals.length !== 1 || !PROVIDERS.includes(provider))
     throw new Error(`name one provider: ${PROVIDERS.join(", ")}`);
   const targets = [values.postgres, values["d1-bundle"], values.memory].filter(Boolean).length;
-  if (targets !== 1)
-    // The alias has no memory target, so its message stays as it was.
-    throw new Error(
-      values.memory
-        ? "name exactly one target: postgres, d1-bundle, or memory"
-        : "name exactly one target: --postgres or --d1-bundle",
-    );
+  if (targets !== 1) throw new Error("name exactly one target: postgres, d1-bundle, or memory");
   // A memory store is empty, so a real run there writes rows that nobody reads.
   if (values.memory && values["dry-run"] !== true)
     throw new Error("--target memory needs --dry-run");
-  if (values.memory && values["better-auth"])
+  // `better-auth` is the compat table set, which only the Postgres target writes.
+  if (values["better-auth"] && !values.postgres)
     throw new Error("--tables compat needs --target postgres");
-  if (values["better-auth"] && !values.postgres) throw new Error("--better-auth needs --postgres");
   for (const [flag, owner] of Object.entries(FLAG_PROVIDER))
     if (values[flag as keyof typeof FLAG_PROVIDER] !== undefined && owner !== provider)
       throw new Error(`${provider} takes no --${display(flag)}`);
