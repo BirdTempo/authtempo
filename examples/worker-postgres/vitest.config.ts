@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 
-// The test runs the Worker's fetch handler on Node against the docker compose
-// Postgres. It does not run in workerd: the Workers pool cannot reach a local
-// Postgres through Hyperdrive in this repo.
+// Two of the three test files run the Worker's fetch handler on Node against
+// the test Postgres. workerd.test.ts runs the Worker in workerd with the
+// test harness of wrangler. The local form of the Hyperdrive binding connects
+// it to the same Postgres. No test runs the Hyperdrive service.
 export default defineConfig({ test: { include: ["test/**/*.test.ts"] } });

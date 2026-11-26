@@ -1,0 +1,19 @@
+{
+  // The config of test/workerd.test.ts only. It is wrangler.jsonc of the
+  // example with the entry of this folder, which keeps each mail for the test.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "my-app-workerd-test",
+  "main": "./entry.ts",
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "BASE_URL": "https://example.test" },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // No local connection string here: workerd.test.ts gives wrangler the
+      // address of its own database in an env value. Without that value
+      // wrangler refuses to start, which is correct.
+      "id": "00000000000000000000000000000000"
+    }
+  ]
+}

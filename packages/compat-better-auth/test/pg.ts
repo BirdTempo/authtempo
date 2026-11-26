@@ -1,4 +1,5 @@
-import postgres, { type Sql } from "postgres";
+import postgres3, { type Sql } from "postgres";
+import postgres4 from "postgres-4";
 import { compatPostgresSteps } from "../src/storage/migration.js";
 import type { Names } from "../src/storage/names.js";
 
@@ -17,6 +18,30 @@ function serverUrl(name: string): string {
 }
 
 export const PG_URL = serverUrl("TEMPO_AUTH_PG_URL");
+
+/**
+ * The driver major of this run. The peer range of the package is
+ * `^3.4.9 || ^4.1.1`. `pnpm test` runs every test on 3.4.9. It then runs
+ * each test file that imports this file on 4.1.1, with TEMPO_AUTH_PG_DRIVER=4
+ * and vitest.pg4.config.ts. `pg-driver.test.ts` proves that the run has the
+ * driver that this value names.
+ */
+export const DRIVER = driverOf(env.TEMPO_AUTH_PG_DRIVER);
+
+function driverOf(value: string | undefined): "3" | "4" {
+  if (value === undefined || value === "" || value === "3") return "3";
+  if (value === "4") return "4";
+  throw new Error(`TEMPO_AUTH_PG_DRIVER is ${value}. Use 3 or 4, or leave it out for 3.`);
+}
+
+/**
+ * The driver of this run. Every test file builds its clients with this
+ * export, never with an import of its own, so one run has one driver. The
+ * tests use the types of 3.4.9. The source names no driver type: it takes
+ * the `PostgresClient` of `@authtempo/adapter-postgres`.
+ */
+export const postgres: typeof postgres3 =
+  DRIVER === "4" ? (postgres4 as unknown as typeof postgres3) : postgres3;
 
 /**
  * A fresh Postgres schema with `tables` (a fixture's SQL) applied and no

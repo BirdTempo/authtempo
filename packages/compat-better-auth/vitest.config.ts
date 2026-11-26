@@ -6,6 +6,8 @@ import { conformanceCountReporter } from "../../scripts/conformance-count-report
 // no passed test (ruling 7 of plan 12g). The D1 runs are in vitest.d1.config.ts.
 // The bun:sqlite run is in vitest.bun.config.ts (plan 12n).
 const RUNS = [
+  // This run is on postgres 3.4.9. The run on 4.1.1 is in vitest.pg4.config.ts.
+  "postgres driver: 3",
   "storage conformance: Better Auth tables on postgres, camelCase (Better Auth's own SQL)",
   "storage conformance: Better Auth tables on postgres, snake_case (consumer-i's tables)",
   "storage conformance: compat sqlite node",

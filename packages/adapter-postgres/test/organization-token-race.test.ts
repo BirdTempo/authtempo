@@ -1,9 +1,9 @@
 import { createAuth, type StorageAdapter } from "@authtempo/core";
 import { createOrganizationTokenAs } from "@authtempo/core/compat";
-import postgres, { type Sql } from "postgres";
+import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
-import { freshDatabase, PG_URL } from "./db.js";
+import { freshDatabase, PG_URL, postgres } from "./db.js";
 
 // The cap of plan 12k Task 8 on the real Postgres adapter, through core's
 // built output. Each instance has its own client of one connection, so the

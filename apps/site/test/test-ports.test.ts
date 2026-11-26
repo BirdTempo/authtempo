@@ -195,7 +195,8 @@ describe("the machine checks of the test servers", () => {
         ).toBe(`serverUrl("${m[0]}")`);
     }
     // 13 helpers on 2026-10-22. A new helper adds itself here after a review of its copy.
-    expect(helpers.length).toBe(13);
+    // 14 on 2026-11-25: examples/worker-postgres/test/workerd.test.ts, the Worker in workerd.
+    expect(helpers.length).toBe(14);
   });
 
   it("reads no server address from the process env of a test helper outside serverUrl", () => {

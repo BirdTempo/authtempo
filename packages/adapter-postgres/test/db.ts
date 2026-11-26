@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION } from "@authtempo/core";
-import postgres, { type Sql } from "postgres";
+import postgres3, { type Sql } from "postgres";
+import postgres4 from "postgres-4";
 import { MIGRATIONS } from "../src/migrations.js";
 
 // The package has no @types/node, so type the one global this file reads.
@@ -17,6 +18,30 @@ function serverUrl(name: string): string {
 }
 
 export const PG_URL = serverUrl("TEMPO_AUTH_PG_URL");
+
+/**
+ * The driver major of this run. The peer range of the package is
+ * `^3.4.9 || ^4.1.1`, so `pnpm test` runs the suite two times: on 3.4.9, then
+ * on 4.1.1 with TEMPO_AUTH_PG_DRIVER=4. A range that one run proves is a
+ * claim for the other major. `driver.test.ts` proves that the run has the
+ * driver that this value names, and the count reporter fails a run without it.
+ */
+export const DRIVER = driverOf(env.TEMPO_AUTH_PG_DRIVER);
+
+function driverOf(value: string | undefined): "3" | "4" {
+  if (value === undefined || value === "" || value === "3") return "3";
+  if (value === "4") return "4";
+  throw new Error(`TEMPO_AUTH_PG_DRIVER is ${value}. Use 3 or 4, or leave it out for 3.`);
+}
+
+/**
+ * The driver of this run. Every test file builds its clients with this
+ * export, never with an import of its own, so one run has one driver. The
+ * tests use the types of 3.4.9. The source names no driver type: it takes a
+ * `PostgresClient` (src/client.ts), which the client of each major fits.
+ */
+export const postgres: typeof postgres3 =
+  DRIVER === "4" ? (postgres4 as unknown as typeof postgres3) : postgres3;
 
 async function createSchema(): Promise<string> {
   const name = `t_${crypto.randomUUID().replaceAll("-", "")}`;

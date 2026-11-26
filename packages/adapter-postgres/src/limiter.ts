@@ -1,5 +1,5 @@
 import { type Clock, type LimiterPort, limiterKey, systemClock } from "@authtempo/core";
-import type { Sql } from "postgres";
+import type { PostgresConnection } from "./client.js";
 
 /**
  * One statement: insert the key at count 1, or on conflict reset the window
@@ -24,13 +24,16 @@ const SWEEP = "DELETE FROM ta_limit WHERE expires_at <= $1::bigint";
  * memory limiter counts per isolate, so its real limit is its limit times
  * the isolate count.
  */
-export function createPostgresLimiter(sql: Sql, clock: Clock = systemClock): LimiterPort {
+export function createPostgresLimiter(
+  sql: PostgresConnection,
+  clock: Clock = systemClock,
+): LimiterPort {
   return {
     // The count lives in the database, so every isolate of the deployment reads one count.
     scope: "shared",
     async allow(key, window) {
       const id = limiterKey(key, window);
-      const rows = await sql.unsafe<{ count: string | number }[]>(ALLOW, [
+      const rows = await sql.unsafe<{ count: string | number }>(ALLOW, [
         id,
         clock.now().getTime(),
         window.seconds * 1000,

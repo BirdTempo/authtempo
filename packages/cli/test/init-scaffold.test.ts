@@ -258,9 +258,10 @@ const PASSES: Readonly<Record<Stack, readonly string[]>> = {
   // Plan 12h ruling 13 adds observe-flush.test.ts with two tests to each Workers example.
   "workers-d1": ["Test Files  3 passed (3)", "Tests  5 passed (5)"],
   // The plan 12i fix wave adds the after-answer test to sign-in.test.ts of the Postgres example.
+  // The move to postgres 4.1.1 adds workerd.test.ts with two tests: the Worker in workerd.
   "workers-postgres": [
-    "Test Files  2 passed (2)",
-    "Tests  5 passed (5)",
+    "Test Files  3 passed (3)",
+    "Tests  7 passed (7)",
     "--dry-run: exiting now.",
   ],
   node: ["node-e2e: PASS", "bun-e2e: PASS"],

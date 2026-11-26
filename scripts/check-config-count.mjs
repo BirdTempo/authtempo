@@ -41,8 +41,10 @@ import { execFileSync } from "node:child_process";
 // gains "scripts", because the package lives under scripts/release.
 // Plan 12n adds packages/compat-better-auth/vitest.bun.config.ts (58, Task 4),
 // counted 2026-11-03.
+// The run of the compat Postgres tests on postgres 4.1.1 adds
+// packages/compat-better-auth/vitest.pg4.config.ts (59), counted 2026-11-25.
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 58;
+const MINIMUM = 59;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

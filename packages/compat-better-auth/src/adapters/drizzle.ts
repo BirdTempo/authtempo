@@ -1,4 +1,4 @@
-import type { Sql } from "postgres";
+import type { PostgresClient } from "@authtempo/adapter-postgres";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { betterAuthSchemaStorage, type D1DatabaseLike } from "../storage/index.js";
 import {
@@ -108,7 +108,7 @@ function isD1(c: unknown): c is D1DatabaseLike {
   );
 }
 
-function isPostgresJs(c: unknown): c is Sql {
+function isPostgresJs(c: unknown): c is PostgresClient {
   return (
     typeof c === "function" &&
     typeof (c as { unsafe?: unknown }).unsafe === "function" &&

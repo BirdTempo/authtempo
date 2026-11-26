@@ -1,11 +1,11 @@
 import type { StorageAdapter } from "@authtempo/core";
 import { coreStatements, POSTGRES } from "@authtempo/core/sql";
-import type { Sql } from "postgres";
 import { createPostgresAdapterOn } from "./adapter.js";
+import type { PostgresClient } from "./client.js";
 import { toStorageError } from "./errors.js";
 import { schemaVersionCheck, schemaVersionPing } from "./schema-version.js";
 
-export function createPostgresAdapter(sql: Sql): StorageAdapter {
+export function createPostgresAdapter(sql: PostgresClient): StorageAdapter {
   return createPostgresAdapterOn(sql, {
     statements: coreStatements(POSTGRES),
     toStorageError,
@@ -15,6 +15,13 @@ export function createPostgresAdapter(sql: Sql): StorageAdapter {
 }
 
 export { createPostgresAdapterOn, type PostgresAdapterOptions } from "./adapter.js";
+export type {
+  PostgresClient,
+  PostgresConnection,
+  PostgresParameter,
+  PostgresRows,
+  PostgresTransaction,
+} from "./client.js";
 export { type CoreFieldType, postgresColumnType } from "./column-types.js";
 export { toStorageError } from "./errors.js";
 export { createPostgresLimiter } from "./limiter.js";

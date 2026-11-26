@@ -4,7 +4,7 @@ import {
   SCHEMA_VERSION_KEY,
   schemaVersionGate,
 } from "@authtempo/core/sql";
-import type { Sql } from "postgres";
+import type { PostgresConnection } from "./client.js";
 
 /** Postgres SQLSTATE for "undefined table". */
 const UNDEFINED_TABLE = "42P01";
@@ -15,9 +15,9 @@ const UNDEFINED_TABLE = "42P01";
  * Every other error passes through, so an outage never reads as "run the
  * migrations".
  */
-async function readVersion(sql: Sql): Promise<string | null> {
+async function readVersion(sql: PostgresConnection): Promise<string | null> {
   try {
-    const rows = await sql.unsafe<{ value: string }[]>(
+    const rows = await sql.unsafe<{ value: string }>(
       `SELECT value FROM ${META_TABLE} WHERE key = $1`,
       [SCHEMA_VERSION_KEY],
     );
@@ -29,7 +29,7 @@ async function readVersion(sql: Sql): Promise<string | null> {
 }
 
 /** The schema version check for Postgres, on the core gate. */
-export function schemaVersionCheck(sql: Sql): () => Promise<void> {
+export function schemaVersionCheck(sql: PostgresConnection): () => Promise<void> {
   return schemaVersionGate(() => readVersion(sql));
 }
 
@@ -37,6 +37,6 @@ export function schemaVersionCheck(sql: Sql): () => Promise<void> {
  * The `ping` of the adapter (plan 12h Task 8): the same read with no cache,
  * each call. It never sets the gate above.
  */
-export function schemaVersionPing(sql: Sql): () => Promise<void> {
+export function schemaVersionPing(sql: PostgresConnection): () => Promise<void> {
   return async () => assertSchemaValue(await readVersion(sql));
 }

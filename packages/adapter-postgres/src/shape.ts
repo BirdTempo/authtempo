@@ -13,7 +13,7 @@ import {
   TABLES,
   uniqueIndexName,
 } from "@authtempo/core/sql";
-import type { Sql } from "postgres";
+import type { PostgresConnection } from "./client.js";
 import { type CoreFieldType, postgresColumnType } from "./column-types.js";
 
 /** One sort order for the tables and the indexes of both shapes, so a parity test compares them as arrays. */
@@ -153,9 +153,9 @@ function indexColumns(def: string): string[] {
  * (plan 11c2). It runs two SELECT statements and writes nothing. The index
  * `<table>_pkey` gives the primary key.
  */
-export async function readPostgresShape(sql: Sql): Promise<LiveShape> {
-  const columns = await sql.unsafe<ColumnRow[]>(COLUMNS_SQL);
-  const indexes = await sql.unsafe<IndexRow[]>(INDEXES_SQL);
+export async function readPostgresShape(sql: PostgresConnection): Promise<LiveShape> {
+  const columns = await sql.unsafe<ColumnRow>(COLUMNS_SQL);
+  const indexes = await sql.unsafe<IndexRow>(INDEXES_SQL);
   const tables = new Map<
     string,
     {

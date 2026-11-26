@@ -3,10 +3,10 @@ import {
   createD1AdapterOn as createD1AdapterOnSeam,
   createD1Limiter as createD1LimiterOnSeam,
 } from "@authtempo/adapter-d1/seam";
+import type { PostgresClient } from "@authtempo/adapter-postgres";
 import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { integerProbe, SQLITE_BOUND_PARAMS, type SqliteDriver } from "@authtempo/adapter-sqlite";
 import { StorageError } from "@authtempo/core";
-import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
   applyBetterAuthCompatMigrations,
@@ -26,7 +26,7 @@ import { compatStatements } from "./statements.js";
 export interface PostgresSchemaStorageOptions extends NamingOptions {
   dialect: "postgres";
   /** A postgres.js client. With Drizzle, pass `db.$client` or use `drizzleAdapter`. */
-  sql: Sql;
+  sql: PostgresClient;
 }
 
 export type PostgresSchemaStorage = CompatDatabase & {

@@ -44,8 +44,8 @@ A runtime dependency installs with the package. A peer dependency is a package t
 | `mysql2` | runtime | `3.24.5` | `@authtempo/cli` | The CLI connects to MySQL with it for migrate and check. |
 | `next` | peer | `^16.4.0` | `@authtempo/next` | The app brings its own Next.js; the Next.js package binds to that copy. |
 | `parseurl` | runtime | `1.3.3` | `@authtempo/express` | The Express adapter reads the raw path and query of the request line with it, as the Express router does. |
-| `postgres` | peer | `^3.4.9` | `@authtempo/adapter-postgres`, `@authtempo/compat-better-auth` | The app brings its own postgres driver and opens the database; the Postgres adapter and the compat package use that client. |
-| `postgres` | runtime | `3.4.9` | `@authtempo/cli` | The CLI connects to Postgres with it for migrate and import, and two examples open their database with it (spec 13). |
+| `postgres` | peer | `^3.4.9 \|\| ^4.1.1` | `@authtempo/adapter-postgres`, `@authtempo/compat-better-auth` | The app brings its own postgres driver and opens the database; the Postgres adapter and the compat package use that client. The tests of both packages run on 3.4.9 and on 4.1.1. |
+| `postgres` | runtime | `3.4.9`, `4.1.1` | `@authtempo/cli` | The CLI connects to Postgres with 3.4.9 for migrate and import. The Node example opens its database with 3.4.9, and the Worker example with 4.1.1 (spec 13). |
 | `react` | peer | `^19.0.0` | `@authtempo/compat-better-auth`, `@authtempo/react` | The app brings its own React; the React package and the compat client hooks bind to that copy. |
 | `react-router` | peer | `^8.4.0` | `@authtempo/react-router` | The app brings its own React Router; the React Router package binds to that copy. |
 | `solid-js` | peer | `^1.9.17` | `@authtempo/solid` | The app brings its own Solid; the Solid package binds to that copy. |

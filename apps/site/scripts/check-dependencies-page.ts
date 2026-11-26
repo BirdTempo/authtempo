@@ -41,7 +41,8 @@ export function pageRow(row: DependencyRow, released: readonly string[]): string
   const cells = [
     code(row.name),
     row.kind,
-    row.versions.map(code).join(", "),
+    // A range such as `^3.4.9 || ^4.1.1` holds the cell separator of a table.
+    row.versions.map((v) => code(v.replaceAll("|", "\\|"))).join(", "),
     users.map(code).join(", "),
     row.reason.replaceAll("|", "\\|"),
   ];

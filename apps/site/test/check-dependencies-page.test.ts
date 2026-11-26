@@ -83,6 +83,24 @@ describe("check-dependencies-page", () => {
     ).toBe("| `x` | peer | `^1.0.0` | `@authtempo/core` | a \\| b |");
   });
 
+  it("keeps a version range with || in one table cell", () => {
+    // The peer range of postgres is `^3.4.9 || ^4.1.1`. A bare | ends the cell,
+    // and the table then shows half the range in the wrong column.
+    const row = pageRow(
+      {
+        name: "postgres",
+        kind: "peer",
+        versions: ["^3.4.9 || ^4.1.1"],
+        users: [released[0] ?? ""],
+        reason: "r",
+      },
+      released,
+    );
+    expect(row).toBe(`| \`postgres\` | peer | \`^3.4.9 \\|\\| ^4.1.1\` | \`${released[0]}\` | r |`);
+    // The real page holds that row for the real range.
+    expect(source).toContain("| `postgres` | peer | `^3.4.9 \\|\\| ^4.1.1` |");
+  });
+
   it("fails a missing page", () => {
     expect(failures({ ...REAL, source: "" })).toContain(
       "docs/reference/dependencies.md does not exist",

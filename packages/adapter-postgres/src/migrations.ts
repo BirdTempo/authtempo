@@ -1,4 +1,4 @@
-import type { Sql } from "postgres";
+import type { PostgresClient } from "./client.js";
 import * as m0001 from "./migrations/0001_schema_v1.js";
 import * as m0002 from "./migrations/0002_schema_v2.js";
 import * as m0003 from "./migrations/0003_schema_v3.js";
@@ -62,7 +62,7 @@ const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_migrations'))";
  * Without the lock, two runners both see an empty list and one fails on
  * CREATE TABLE, so the deploy fails.
  */
-export async function applyPostgresMigrations(sql: Sql): Promise<string[]> {
+export async function applyPostgresMigrations(sql: PostgresClient): Promise<string[]> {
   // Two concurrent CREATE TABLE IF NOT EXISTS can still collide in the
   // catalog, so this statement also runs under the lock.
   await sql.begin(async (tx) => {
@@ -73,7 +73,7 @@ export async function applyPostgresMigrations(sql: Sql): Promise<string[]> {
   for (const m of MIGRATIONS) {
     const ran = await sql.begin(async (tx) => {
       await tx.unsafe(LOCK);
-      const done = await tx.unsafe<{ name: string }[]>(`SELECT 1 FROM ${TABLE} WHERE name = $1`, [
+      const done = await tx.unsafe<{ name: string }>(`SELECT 1 FROM ${TABLE} WHERE name = $1`, [
         m.name,
       ]);
       if (done.length > 0) return false;

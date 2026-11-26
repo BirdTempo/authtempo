@@ -4,7 +4,7 @@
 // is missing or has no passed test. It also fails a run whose passed count is
 // below its test count: a skipped test is a test that did not run. A run is a
 // top-level describe whose name starts with one of PREFIXES, such as
-// "storage conformance: d1".
+// "storage conformance: d1", or whose name is one of the expected names.
 
 /** The describe prefixes of core's suites (rulings 5 and 7 of plan 12g). */
 export const PREFIXES = [
@@ -37,7 +37,12 @@ export function conformanceCountReporter({ expected }) {
       const runs = new Map();
       for (const module of testModules)
         for (const suite of module.children.suites()) {
-          if (!PREFIXES.some((p) => suite.name.startsWith(p))) continue;
+          // A run is a suite of core, by its prefix, or a suite that the package
+          // names in `expected`, such as "postgres driver: 4". PREFIXES holds
+          // the suites of core only: the SQLite adapter expects each prefix
+          // for each of its drivers, so a prefix of one package must not be there.
+          if (!PREFIXES.some((p) => suite.name.startsWith(p)) && !expected.includes(suite.name))
+            continue;
           const run = runs.get(suite.name) ?? { tests: 0, passed: 0 };
           for (const test of suite.children.allTests()) {
             run.tests += 1;

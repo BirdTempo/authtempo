@@ -787,25 +787,33 @@
       "@authtempo/import",
       "@authtempo/site"
     ],
-    "reason": "The adapter, compat, import, and docs site tests open their Postgres databases with it.",
-    "read": "2026-10-09"
+    "reason": "The adapter, compat, import, and docs site tests open their Postgres databases with it. It is the oldest version of the peer range.",
+    "read": "2026-11-25"
   },
   {
     "name": "postgres",
     "kind": "peer",
-    "versions": ["^3.4.9"],
+    "versions": ["^3.4.9 || ^4.1.1"],
     "users": ["@authtempo/adapter-postgres", "@authtempo/compat-better-auth"],
-    "reason": "The app brings its own postgres driver and opens the database; the Postgres adapter and the compat package use that client.",
-    "read": "2026-10-09"
+    "reason": "The app brings its own postgres driver and opens the database; the Postgres adapter and the compat package use that client. The tests of both packages run on 3.4.9 and on 4.1.1.",
+    "read": "2026-11-25"
   },
   {
     "name": "postgres",
     "kind": "runtime",
-    "versions": ["3.4.9"],
+    "versions": ["3.4.9", "4.1.1"],
     "users": ["@authtempo/cli", "authtempo-example-node", "authtempo-example-worker-postgres"],
-    "reason": "The CLI connects to Postgres with it for migrate and import, and two examples open their database with it (spec 13).",
-    "read": "2026-10-09",
+    "reason": "The CLI connects to Postgres with 3.4.9 for migrate and import. The Node example opens its database with 3.4.9, and the Worker example with 4.1.1 (spec 13).",
+    "read": "2026-11-25",
     "seam": "packages/cli/src/seams/postgres.ts; examples/node/src/app.ts; examples/worker-postgres/src/index.ts"
+  },
+  {
+    "name": "postgres-4",
+    "kind": "dev",
+    "versions": ["npm:postgres@4.1.1"],
+    "users": ["@authtempo/adapter-postgres", "@authtempo/compat-better-auth"],
+    "reason": "An alias of postgres 4.1.1. The peer range of postgres is ^3.4.9 || ^4.1.1, and the adapter and compat tests run a second time on this version. Version 4.1.1 has the Unlicense, no dependency, and no install script.",
+    "read": "2026-11-25"
   },
   {
     "name": "prisma",
