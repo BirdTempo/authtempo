@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
   COMPILER_PIN,
+  changelogCommits,
   changesetStatus,
   checkChangesets,
   entry,
@@ -21,6 +22,7 @@ import {
   RUNTIME_KEYS,
   readInput,
   statusNotes,
+  versionedBy,
 } from "../src/check-changesets.ts";
 import { BREAKING, breakingByMinor, isBreaking, unreadBreaking } from "../src/check-pack.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
@@ -631,6 +633,150 @@ describe("check-changesets", () => {
     expect(readInput(repo.root, "main")).toMatchObject({ baseVersion: "0.0.0", version: "0.1.0" });
     // The version branch exempts each file that rewrite-unpublished writes (ruling 50 of plan 12j).
     expect(readInput(repo.root, "main").unpublished).toEqual(rewrittenPaths());
+  });
+
+  // Release 0.2.0: the runbook removes the code of each due item on the
+  // version branch, so that branch holds a source change and no changeset.
+  describe("a source change on the version branch", () => {
+    const CHANGELOG = [
+      "# @authtempo/core",
+      "",
+      "## 0.2.0",
+      "",
+      "### Minor Changes",
+      "",
+      "- 1a22e8a: Breaking: core reads the old cookie no more.",
+      "",
+      "  A second paragraph of the entry.",
+      "",
+      "- c79bf6c: An entry of a commit on main.",
+      "",
+      "### Patch Changes",
+      "",
+      "- Updated dependencies [1a22e8a]",
+      "- Updated dependencies [9999999]",
+      "  - @authtempo/client@0.2.0",
+      "",
+      "## 0.1.1",
+      "",
+      "### Patch Changes",
+      "",
+      "- 0ddba11: An entry of the release before.",
+      "",
+    ].join("\n");
+    const BRANCH = ["1a22e8aff0000000000000000000000000000000"];
+
+    it("reads the commit of each entry of one version section", () => {
+      expect(changelogCommits(CHANGELOG, "0.2.0")).toEqual(["1a22e8a", "c79bf6c"]);
+      expect(changelogCommits(CHANGELOG, "0.1.1")).toEqual(["0ddba11"]);
+      expect(changelogCommits(CHANGELOG, "0.3.0")).toEqual([]);
+      expect(changelogCommits("", "0.2.0")).toEqual([]);
+    });
+
+    it("takes an entry of a commit of the branch only, and of the new version only", () => {
+      expect(versionedBy(CHANGELOG, "0.2.0", BRANCH)).toBe(true);
+      // The commit of the entry is on main: it covers no change of this branch.
+      expect(versionedBy(CHANGELOG, "0.2.0", ["c0ffee0000000000000000000000000000000000"])).toBe(
+        false,
+      );
+      // The branch commit has an entry in 0.2.0, not in the section of the release before.
+      expect(versionedBy(CHANGELOG, "0.1.1", BRANCH)).toBe(false);
+      // A line of updated dependencies is no entry of the package: 9999999 names no changeset.
+      expect(versionedBy(CHANGELOG, "0.2.0", ["9999999000000000000000000000000000000000"])).toBe(
+        false,
+      );
+      expect(versionedBy(CHANGELOG, "0.2.0", [])).toBe(false);
+    });
+
+    const step = (baseVersion: string | null, versioned: string[] | undefined) =>
+      checkChangesets({
+        changed: paths("packages/core/src/x.ts", "packages/cli/src/y.ts"),
+        changesets: [],
+        released,
+        dirs,
+        files,
+        commits: 2,
+        version: "0.2.0",
+        baseVersion,
+        ...(versioned === undefined ? {} : { versioned }),
+      });
+
+    it("covers the package that has a changelog entry of the branch, and no other", () => {
+      const r = step("0.1.1", ["@authtempo/core"]);
+      expect(r.failures).toEqual([
+        "@authtempo/cli changes and no changeset names it: packages/cli/src/y.ts",
+      ]);
+      expect(r.notes).toContain("@authtempo/core has a changelog entry of this branch for 0.2.0");
+      const both = step("0.1.1", ["@authtempo/core", "@authtempo/cli"]);
+      expect(both.failures).toEqual([]);
+      expect(summaryLine(both)).toBe(
+        "check-changesets: PASS changed=2 covered=2 exempt=0 empty=0 failures=0",
+      );
+    });
+
+    it("covers nothing with no entry, on a branch that keeps the version, and for a name that is not released", () => {
+      const all = [
+        "@authtempo/cli changes and no changeset names it: packages/cli/src/y.ts",
+        "@authtempo/core changes and no changeset names it: packages/core/src/x.ts",
+      ];
+      expect(step("0.1.1", undefined).failures).toEqual(all);
+      expect(step("0.1.1", []).failures).toEqual(all);
+      // The version is the same at the merge base: this is no version branch.
+      expect(step("0.2.0", ["@authtempo/core", "@authtempo/cli"]).failures).toEqual(all);
+      expect(step(null, ["@authtempo/core", "@authtempo/cli"]).failures).toEqual(all);
+      const unreleased = step("0.1.1", ["authtempo-example-node"]);
+      expect(unreleased.failures).toEqual(all);
+      expect(unreleased.notes.filter((n) => n.includes("changelog entry"))).toEqual([]);
+    });
+
+    it("reads the entries from a real version branch: the removal commit, then changeset version", () => {
+      repo = fixtureRepo({
+        // A changeset on main, for a change that main holds already.
+        ".changeset/on-main.md": '---\n"@fixture/a": minor\n---\n\nAdd the first feature.\n',
+      });
+      // The removal with its changeset, as one commit of the version branch.
+      repo.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+      repo.write(
+        ".changeset/removal.md",
+        '---\n"@fixture/a": minor\n---\n\nBreaking: `old` is removed.\n',
+      );
+      repo.commit("remove the old item");
+      // Before the version step, the changeset of the branch names the package.
+      expect(summaryLine(checkChangesets(readInput(repo.root, "main")))).toBe(
+        "check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0",
+      );
+      repo.run(process.execPath, [CHANGESET_BIN, "version"]);
+      repo.commit("version packages");
+      const input = readInput(repo.root, "main");
+      expect(input).toMatchObject({ baseVersion: "0.0.0", version: "0.1.0" });
+      expect(input.versioned).toEqual(["@fixture/a"]);
+      expect(input.changesets).toEqual([]);
+      const report = checkChangesets(input);
+      expect(report.failures).toEqual([]);
+      expect(summaryLine(report)).toBe(
+        "check-changesets: PASS changed=1 covered=1 exempt=2 empty=0 failures=0",
+      );
+    });
+
+    it("fails a real version branch whose source change has only a changeset of main", () => {
+      repo = fixtureRepo({
+        ".changeset/on-main.md": '---\n"@fixture/a": minor\n---\n\nAdd the first feature.\n',
+      });
+      // A source change with no changeset of its own.
+      repo.write("packages/a/src/foo.ts", "export const foo = 3;\n");
+      repo.commit("change the source with no changeset");
+      repo.run(process.execPath, [CHANGESET_BIN, "version"]);
+      repo.commit("version packages");
+      const input = readInput(repo.root, "main");
+      // The changelog has an entry, but its commit is on main.
+      expect(
+        changelogCommits(readFileSync(join(repo.root, "packages/a/CHANGELOG.md"), "utf8"), "0.1.0"),
+      ).toHaveLength(1);
+      expect(input.versioned).toEqual([]);
+      expect(checkChangesets(input).failures).toEqual([
+        "@fixture/a changes and no changeset names it: packages/a/src/foo.ts",
+      ]);
+    });
   });
 
   it("writes a later Breaking: line that breakingByMinor reads (ruling 67 of plan 12j, Major 3)", () => {

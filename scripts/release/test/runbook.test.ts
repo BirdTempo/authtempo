@@ -363,9 +363,18 @@ describe("docs/release/RUNBOOK.md", () => {
       "Keep its entry in the register",
       'Then change the test "reads the real register" in `scripts/release/test/check-deprecations.test.ts` to the new state.',
       "before the pull request of step 7.",
+      // Release 0.2.0: the removal needs its changeset before `changeset version` (step 3).
+      "Commit each removal with its changeset before step 3, and do not rebase or amend that commit after step 3.",
+      "`check-changesets` takes a source change only with a changelog entry of a commit of the branch",
       "Without it, that test fails the evidence run of `pnpm release:check`, and the check stops there.",
     ])
       expect(step, part).toContain(part);
+    // The rule that the step names is in the check.
+    const changesets = readFileSync(
+      new URL("scripts/release/src/check-changesets.ts", ROOT),
+      "utf8",
+    );
+    expect(changesets).toContain("export function versionedBy(");
     // The test that the step names, and the stop that the step states.
     const test = readFileSync(
       new URL("scripts/release/test/check-deprecations.test.ts", ROOT),
