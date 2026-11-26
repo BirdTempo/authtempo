@@ -29,6 +29,14 @@ export default defineConfig({
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     // test/sqlite/bun runs under the Bun runtime (vitest.bun.config.ts).
     exclude: ["test/d1/**", "test/sqlite/bun/**"],
+    // The Postgres tests of this run share one server with the two runs of the
+    // adapter-postgres suite and with vitest.pg4.config.ts. Measured on 2026-11-25
+    // and 2026-11-26 in 8 full runs of the repo, at a load of 2 to 22: the test
+    // "migrates a database with the table and one with no table > on Postgres"
+    // took 0.2 s alone and 0.4 to 3.8 s in a full run, and it passed the
+    // default limit of 5 s in 2 of the 8 runs. 15 s is the limit of the
+    // adapter-postgres suite and of vitest.pg4.config.ts.
+    testTimeout: 15_000,
     reporters: ["default", conformanceCountReporter({ expected: RUNS })],
   },
 });
