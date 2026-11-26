@@ -18,7 +18,9 @@ sources:
 
 ## The rate limits
 
-A key ends in the address, the IP, or the user id. A request with no client IP uses `unknown` in place of the IP.
+A key ends in the address, the IP, or the user id. A request with no client IP uses `unknown` in place of the IP, unless `limits.noClientIp` refuses it.
+
+Each row gives the default window. [Change a limit](#change-a-limit) tells how a deployment sets another window.
 
 The first two parts of a key are its family, such as `magic-link:email`. A refusal emits the event `limit.hit` with the family and no part of the key. Each family of `LIMIT_FAMILIES` has one row here, and a site check holds the table to the code.
 
@@ -150,6 +152,48 @@ The phone add counts on `phone-add:phone`, not on the two `phone-otp` keys of a 
 The per-number phone keys read the number as given. Two E.164 forms can name one handset, such as `+4407700900123` and `+447700900123`. Each form then gets its own count. Core uses no phone library and does not rewrite a number. Give an SMS port that refuses a form that its supplier rewrites.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
+
+## Change a limit
+
+`limits.windows` gives a limit family another window. The key is the family, the first two parts of a key of the table.
+
+| Entry of `limits.windows` | The window that it sets |
+| --- | --- |
+| `"otp:email": { max: 5 }` | 5 code requests for each address in the default 15 minutes |
+| `"password:ip": { max: 10, seconds: 300 }` | 10 sign-in tries for each IP in 5 minutes |
+
+- `max` is the count of calls, a whole number from 1 to 100000.
+- `seconds` is the length of the window, a whole number from 1 to 86400. Leave it out to keep the default length.
+- Core refuses a family that it does not know at the start, so a wrong name never changes nothing in silence.
+- The stored key holds the window. So a new window starts a new count, and the old count ends with its own window.
+- `GET /operator/info` lists `limits.windows` in the config keys, with no value.
+
+:::caution
+Warning: a higher `max` or a shorter window lets a caller try more. The numbers of the table are the reviewed numbers. Raise a limit that guards a guess, such as `otp-verify:email` or `totp-code:user`, only after you size the guess rate that it permits.
+:::
+
+Six families take their window from another setting, and `limits.windows` refuses each one. Change that setting.
+
+| Family | The setting of its window |
+| --- | --- |
+| `token-use:tk`, `token-use:to` | The `rateLimit` of the token |
+| `oauth-device-poll:code` | The poll interval of the device code |
+| `phone-otp:all-day` | `phone.dailyCap` |
+| `anonymous:all-day` | `anonymous.dailyCap` |
+| `passkey-sign-up:all-day` | `passkey.signUp.dailyCap` |
+
+## A request with no client IP
+
+`clientIp` gives null when the request has no client IP. The default `clientIp` reads `cf-connecting-ip`, which only Cloudflare sets.
+
+- **`limits.noClientIp: "shared"`**, the default. Each per-IP limit counts the request on the one key `unknown`. So one caller with no IP can spend the count of each other caller with no IP.
+- **`limits.noClientIp: "refuse"`**. `handle` answers 403 [`client_ip_missing`](/docs/reference/errors/#client_ip_missing) before any route. No limit counts the request, and no key is shared.
+
+Use `"refuse"` when your proxy always sets the client IP. A request with no IP then did not come through that proxy.
+
+With `"refuse"`, an in-process call of `auth.api` with `ip: null` throws at its first per-IP limit. Pass the client IP of the person. For a call with no person, such as a job, pass a fixed text that names the caller. A text that is not an IP keys `text:` and the text, so it has a count of its own.
+
+A `clientIp` function that throws still answers 500 `internal`. Only a null is a request with no client IP.
 
 ## The device code
 

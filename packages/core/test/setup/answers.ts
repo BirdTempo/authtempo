@@ -58,9 +58,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
   const { answerKinds } = await import("../../src/http/contract/types.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
-  const { BODY_CODE, BUSY_CODE, HOST_CODE, ROUTER_CODES, ROUTES, TIMEOUT_CODE } = await import(
-    "../../src/http/route-list.js"
-  );
+  const { BODY_CODE, BUSY_CODE, CLIENT_IP_CODE, HOST_CODE, ROUTER_CODES, ROUTES, TIMEOUT_CODE } =
+    await import("../../src/http/route-list.js");
   const { BODY_CAPS } = await import("../../src/http/body-cap.js");
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
   type AnswerKind = RouteContract["answer"];
@@ -79,7 +78,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const ENTRIES = new Map<string, RouteEntry>(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
   const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
   // The host code of a baseURL list: any route answers it, and no entry declares it.
-  const ROUTER = new Set<string>([...ROUTER_CODES, HOST_CODE]);
+  // The same holds for the code of a request with no client IP under `limits.noClientIp: "refuse"`.
+  const ROUTER = new Set<string>([...ROUTER_CODES, HOST_CODE, CLIENT_IP_CODE]);
   /**
    * The keys of an error body beside `error`, for each code that has one
    * (ruling 7 of plan 12h). `message` is on hook_refused, and on the

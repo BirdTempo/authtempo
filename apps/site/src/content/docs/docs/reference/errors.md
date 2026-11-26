@@ -496,6 +496,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | Every route, and `auth.wellKnown`, while `baseURL` is a list. See [the base URL list](/docs/guides/base-url-list/). |
 
+<h3 id="client_ip_missing"><code>client_ip_missing</code> 403</h3>
+
+- **Meaning:** `limits.noClientIp` is `refuse`, and `clientIp` gave no IP for the request. No handler ran, and no limit counted the request.
+- **Do:** Send the request through the proxy that sets the client IP. If the proxy did send it, correct `clientIp` so that it reads the header of that proxy.
+
+| Routes |
+| --- |
+| Every route, while `limits.noClientIp` is `refuse`. See [a request with no client IP](/docs/reference/limits/#a-request-with-no-client-ip). |
+
 <h3 id="body_too_large"><code>body_too_large</code> 413</h3>
 
 - **Meaning:** The request body is longer than the cap of its route. Core stopped the read at the cap, so no handler parsed the body. A false or absent `content-length` does not change the count. The cap is 65536 bytes, 262144 bytes for `POST /social/apple/callback`, 4194304 bytes for `POST /sso/setup/connection`, and 8388608 bytes for the two SSO connection writes. The router answers it for every route that reads a body.

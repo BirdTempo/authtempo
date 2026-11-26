@@ -7,7 +7,13 @@ import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMMANDS, PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
-import { ERRORS, GUIDES, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
+import {
+  ERRORS,
+  GUIDES,
+  LIMITS_FROM_SETTINGS,
+  OAUTH_ERRORS,
+  SCHEMA_VERSION,
+} from "@authtempo/core";
 import { STORAGE_ERROR_CODES } from "@authtempo/core/errors";
 import { EVENTS, LIMIT_FAMILIES } from "@authtempo/core/observe";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
@@ -335,6 +341,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distPageOrEmpty("/docs/reference/limits/"),
         LIMIT_FAMILIES,
         limitWindows(coreSources(), DYNAMIC_LIMITS),
+        Object.keys(LIMITS_FROM_SETTINGS),
       ),
   },
   {

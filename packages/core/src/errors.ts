@@ -148,6 +148,9 @@ export const ERRORS = {
   // 12j ruling 59 Major 1: a read above the floor that stalled past LARGE_READ_IDLE_MS
   // or ran past largeReadDeadlineMs. The router answers it, and no parse runs.
   body_timeout: 408,
+  // `limits.noClientIp: "refuse"`: the request has no client IP, so the router answers
+  // it before any route. A request with no IP did not come through the proxy that sets it.
+  client_ip_missing: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

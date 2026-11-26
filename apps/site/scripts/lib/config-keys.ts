@@ -17,6 +17,7 @@ import type {
   JwtMintConfig,
   LastMethodConfig,
   LegacyVerifyConfig,
+  LimitsConfig,
   LinkedInConfig,
   MicrosoftConfig,
   MultiSessionConfig,
@@ -103,6 +104,7 @@ export const CONFIG_KEYS = {
     lastMethod: true,
     anonymous: true,
     multiSession: true,
+    limits: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -440,6 +442,7 @@ export const CONFIG_KEYS = {
     isolateLimiter: true,
   } satisfies Keys<AnonymousConfig>,
   multiSession: { max: true } satisfies Keys<MultiSessionConfig>,
+  limits: { noClientIp: true, windows: true } satisfies Keys<LimitsConfig>,
   observe: {
     sink: true,
     include: true,

@@ -191,6 +191,10 @@ export const BETTER_AUTH_CODES = {
   // Plan 12i Task 18: Better Auth 1.7.2 throws at a host outside allowedHosts
   // and names no code. The shim answers HOST_NOT_ALLOWED. The status stays core's.
   host_not_allowed: "HOST_NOT_ALLOWED",
+  // Core answers it only with `limits.noClientIp: "refuse"`. The shim builds
+  // the core config with no `limits`, so no shim route answers it. Better
+  // Auth 1.7.2 has no such refusal and names no code. The map holds each code of core.
+  client_ip_missing: "CLIENT_IP_MISSING",
   // Plan 12i Task 5: the phone-number plugin's name for a number that another
   // user holds (plugins/phone-number/error-codes.mjs, read 2026-10-24).
   phone_taken: "PHONE_NUMBER_EXIST",

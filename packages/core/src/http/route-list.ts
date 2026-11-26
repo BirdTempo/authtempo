@@ -3181,6 +3181,14 @@ export type RouterCode = (typeof ROUTER_CODES)[number];
 export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
 
 /**
+ * The code that the router answers on every route for a request with no
+ * client IP, while `limits.noClientIp` is `refuse`. No entry declares it,
+ * and the OpenAPI document states it in its rules, as it states `HOST_CODE`:
+ * a deployment with the default `shared` never answers it.
+ */
+export const CLIENT_IP_CODE = "client_ip_missing" as const satisfies ErrorCode;
+
+/**
  * The code that the router answers for a request body past the cap of its
  * route (`bodyCapOf`, rulings 43 and 46 of the 12j lane). Each route with a body in
  * its contract can answer it. No entry declares it, and the OpenAPI

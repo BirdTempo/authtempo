@@ -34,7 +34,7 @@ export function ipKey(ip: string | null): string {
 }
 
 /** The key of every caller with no IP. Each text gives `TEXT_KEY` first, and an address gives digits and hex. */
-const NO_IP_KEY = "unknown";
+export const NO_IP_KEY = "unknown";
 
 /** The start of the key of a text that is not an IP: no key of an address or of no IP starts so. */
 const TEXT_KEY = "text:";

@@ -81,6 +81,8 @@ import { ROUTES } from "./http/route-list.js";
 import type { SetupPageInput } from "./http/setup-page.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
+import type { ResolvedLimitsConfig } from "./limiter/limit-window.js";
+import { type LimitsConfig, resolveLimitsConfig } from "./limiter/limits-config.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort, LimitWindow } from "./limiter/port.js";
 import { type ResolvedObserve, resolveObserve } from "./observe/config.js";
@@ -565,6 +567,13 @@ export interface AuthConfig {
    * cookie, and `POST /sign-out` ends every session of the browser.
    */
   multiSession?: MultiSessionConfig | false;
+  /**
+   * The limits of the deployment. `windows` changes the window of a limit
+   * family, and `noClientIp` decides what a request with no client IP does.
+   * Off when absent: each family keeps the window of the limits page, and
+   * each request with no client IP shares the one count `unknown`.
+   */
+  limits?: LimitsConfig;
 }
 
 /** Multi-session (plan 12i). A bearer client has no bag. */
@@ -1439,6 +1448,8 @@ export interface ResolvedConfig {
   storage: StorageAdapter;
   mail: MailPort;
   limiter: LimiterPort;
+  /** The windows that the config changed, and the rule of a request with no client IP. */
+  limits: ResolvedLimitsConfig;
   clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
@@ -2057,6 +2068,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     storage: input.storage,
     mail: input.mail,
     limiter: input.limiter ?? createMemoryLimiter(clock),
+    limits: resolveLimitsConfig(input.limits),
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,

@@ -1,3 +1,4 @@
+import { LIMITS_FROM_SETTINGS } from "@authtempo/core";
 import { LIMIT_FAMILIES } from "@authtempo/core/observe";
 import { describe, expect, it } from "vitest";
 import { checkLimits, DYNAMIC_LIMITS, windowSeconds } from "../scripts/check-limits.ts";
@@ -48,6 +49,28 @@ describe("checkLimits", () => {
     expect(r.failures).toEqual([]);
     expect(r.counts.rows).toBe(r.counts.families);
     expect(r.counts.compared).toBe(LIMIT_FAMILIES.length - DYNAMIC_LIMITS.size);
+  });
+
+  it("holds LIMITS_FROM_SETTINGS of core to the families whose window comes from a setting", () => {
+    const real = (list: readonly string[]) =>
+      checkLimits(
+        distPageOrEmpty("/docs/reference/limits/"),
+        LIMIT_FAMILIES,
+        limitWindows(coreSources(), DYNAMIC_LIMITS),
+        list,
+      );
+    const list = Object.keys(LIMITS_FROM_SETTINGS);
+    const pass = real(list);
+    expect(pass.failures).toEqual([]);
+    expect(pass.counts.fromSettings).toBe(6);
+    // A family that the list lacks: the config would take a window that the code ignores.
+    expect(real(list.filter((f) => f !== "phone-otp:all-day")).failures).toEqual([
+      "family phone-otp:all-day takes a part of its window from a setting, and LIMITS_FROM_SETTINGS of core does not list it",
+    ]);
+    // A family that the list has with no cause: the config would refuse a window that works.
+    expect(real([...list, "otp:email"]).failures).toEqual([
+      "LIMITS_FROM_SETTINGS of core lists otp:email, and each limit call of it has a window of numbers",
+    ]);
   });
 
   it("fails on a missing family and on an extra key", () => {
