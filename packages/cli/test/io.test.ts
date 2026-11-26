@@ -1,6 +1,15 @@
 // The three Io members of plan 11c2 on the real io: the random source, the
-// new private file, and the runtime. Each test runs in its own temporary folder.
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+// new private file, and the runtime. Also the private write of the import
+// bundle and the report file. Each test runs in its own temporary folder.
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -40,6 +49,17 @@ describe("nodeIo (plan 11c2)", () => {
     // No folder is made on the way: a path under a missing folder throws.
     expect(() => io.writeNewPrivate(join(dir, "no-such", "file.txt"), "x")).toThrow();
     expect(existsSync(join(dir, "no-such"))).toBe(false);
+  });
+
+  it("writes a private file with mode 0600, also over a file with a wider mode", () => {
+    // `authtempo import` writes the D1 bundle and the report file with this member.
+    const p = join(dir, "bundle.json");
+    writeFileSync(p, "old", { mode: 0o644 });
+    io.writePrivate(p, "secret");
+    expect(statSync(p).mode & 0o777).toBe(0o600);
+    expect(readFileSync(p, "utf8")).toBe("secret");
+    io.writePrivate(join(dir, "fresh.json"), "x");
+    expect(statSync(join(dir, "fresh.json")).mode & 0o777).toBe(0o600);
   });
 
   it("reports the runtime of the process", () => {

@@ -49,7 +49,7 @@ export function anonymousRoutes(config: ResolvedConfig): Route[] {
         const r = await deleteAnonymous(ctx.config, { session: s.resolved });
         if (!r.ok) return sent(respond(r), s.renewed);
         // The session is gone: answer as the sign-out does, with no renewed cookie.
-        return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request));
+        return signedOut(ctx.config);
       },
     },
   ];

@@ -96,7 +96,7 @@ describe("the shim and plan 12b", () => {
     );
   });
 
-  it("names the session cookie __Host-tempo_session and moves the old cookie", async () => {
+  it("names the session cookie __Host-tempo_session and reads the old cookie tempo_session no more", async () => {
     const auth = betterAuth(passwordOptions());
     const up = await auth.handler(
       new Request(`${BASE}/api/auth/password/sign-up`, {
@@ -112,18 +112,19 @@ describe("the shim and plan 12b", () => {
     const set = up.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_session="));
     expect(set).toMatch(/^__Host-tempo_session=ts_[^;]+; Path=\/;/);
     const token = /^__Host-tempo_session=([^;]+)/.exec(set ?? "")?.[1] ?? "";
+    // Until 0.2.0 the handler moved a live token of the old cookie to the new
+    // name. Now the old cookie is no session, and the handler writes no cookie.
     const old = await auth.handler(
       new Request(`${BASE}/api/auth/session`, { headers: { cookie: `tempo_session=${token}` } }),
     );
-    expect(old.status).toBe(200);
-    expect(old.headers.getSetCookie()).toContain(
-      "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
-    );
+    expect(old.status).toBe(401);
+    expect(old.headers.getSetCookie()).toEqual([]);
     expect(
-      old.headers.getSetCookie().some((c) => c.startsWith(`__Host-tempo_session=${token};`)),
-    ).toBe(true);
+      await auth.api.getSession({ headers: new Headers({ cookie: `tempo_session=${token}` }) }),
+    ).toBeNull();
+    // The same token in the new cookie is the session.
     const session = await auth.api.getSession({
-      headers: new Headers({ cookie: `tempo_session=${token}` }),
+      headers: new Headers({ cookie: `__Host-tempo_session=${token}` }),
     });
     expect(session?.user.email).toBe("a@example.com");
     // Better Auth's session.token comes from the shim's own read of the cookie.

@@ -89,8 +89,8 @@ export interface AuthProxyOptions {
   auth?: AuthSource<Pick<Auth, "session">> | undefined;
   /**
    * The session cookie name, as core's `cookieName`. Default
-   * `__Host-tempo_session`; with the default, the name before plan 12b
-   * (`tempo_session`) counts too, for one release, as core reads it.
+   * `__Host-tempo_session`. Until 0.2.0 the name before plan 12b,
+   * `tempo_session`, counted too. Core reads it no more, and so does the proxy.
    */
   cookieName?: string | undefined;
 }

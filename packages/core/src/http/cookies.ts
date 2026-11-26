@@ -7,10 +7,11 @@
  */
 export const DEFAULT_SESSION_COOKIE = "__Host-tempo_session";
 /**
- * The session cookie before plan 12b. For one release core reads it when a
- * request carries no `__Host-tempo_session`, and moves it (the router). The
- * release after removes the read (row 12j). Load-bearing: a browser of a
- * deployed app holds this name.
+ * The session cookie before plan 12b. Core read it and moved it until 0.2.0,
+ * and reads it no more. The name stays reserved: the config refuses it for
+ * each other cookie of core, so a cookie that an old browser still holds
+ * cannot take the place of another. The Expo storage key of the Better Auth
+ * shim also holds this name, and a new key signs every Expo user out.
  */
 export const LEGACY_SESSION_COOKIE = "tempo_session";
 

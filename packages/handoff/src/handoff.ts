@@ -1,8 +1,7 @@
 import { type ClientCode, createClient } from "@authtempo/client";
+import { makePkce, type PkceCrypto, parseReturnedUrl, webCrypto } from "@authtempo/client/oauth";
 import type { PublicSession } from "@authtempo/core";
 import { HANDOFF_CALLS } from "./calls.js";
-import { type HandoffCrypto, makePkce, webCrypto } from "./pkce.js";
-import { parseReturnedUrl } from "./redirect.js";
 
 export interface HandoffOpener {
   /**
@@ -29,7 +28,7 @@ export interface HandoffOptions {
   redirect: string;
   opener: HandoffOpener;
   fetch?: typeof fetch | undefined;
-  crypto?: HandoffCrypto | undefined;
+  crypto?: PkceCrypto | undefined;
 }
 
 export interface Handoff {

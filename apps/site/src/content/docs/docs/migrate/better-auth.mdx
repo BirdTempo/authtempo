@@ -201,7 +201,7 @@ A moved key counts against the cap of 50 live tokens per owner, because it acts.
 ## How it behaves
 
 - Better Auth's defaults apply: a session lives 7 days and refreshes after 1 day.
-- The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie. For one release the shim also reads `tempo_session`, the name before plan 12b, and the handler moves it. On Expo, `getCookie()` answers `__Host-tempo_session=<token>`, and the storage key keeps the name `<storagePrefix>_tempo_session`.
+- The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie. The shim read `tempo_session`, the name before plan 12b, until 0.2.0, and reads it no more. On Expo, `getCookie()` answers `__Host-tempo_session=<token>`, and the storage key keeps the name `<storagePrefix>_tempo_session`.
 - The cookie name keeps the old product name tempo-auth for compatibility. [Cookies](/docs/reference/cookies/) states the rule.
 - The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
 - `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.

@@ -279,10 +279,10 @@ export interface AuthConfig {
   clientIp?: (request: Request) => string | null;
   clock?: Clock;
   /**
-   * The session cookie. Default `__Host-tempo_session` (plan 12b). With that
-   * name, core also reads the old `tempo_session` for one release and moves
-   * it. Another name gets no such read. `__Host-tempo_signup` is refused: it
-   * is the sign-up proof cookie (plan 12q).
+   * The session cookie. Default `__Host-tempo_session` (plan 12b). Until
+   * 0.2.0 core also read the old `tempo_session` with that name, and reads
+   * it no more. `__Host-tempo_signup` is refused: it is the sign-up proof
+   * cookie (plan 12q).
    */
   cookieName?: string;
   session?: {
@@ -1455,8 +1455,6 @@ export interface ResolvedConfig {
   clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
-  /** The old session cookie that the router moves, or null when `cookieName` is not the default (plan 12b). */
-  legacyCookieName: string | null;
   session: {
     ttlDays: number;
     slidingRefreshDays: number;
@@ -2034,7 +2032,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (signUp === "invited" && !organizations)
     throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
-  const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
+  const { cookieName } = sessionCookieNames(input.cookieName);
   // A sign-up would set its proof over the session cookie (ruling 11 of plan 12q).
   if (cookieName === SIGN_UP_PROOF_COOKIE)
     throw new ConfigError(
@@ -2074,7 +2072,6 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,
-    legacyCookieName,
     session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,

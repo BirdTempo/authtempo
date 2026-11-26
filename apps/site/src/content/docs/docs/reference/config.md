@@ -37,7 +37,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `clientIp` | function of the request | reads `cf-connecting-ip` | Answers the client IP, or null. Off Workers, read the header of your trusted proxy. |
 | `limits` | object | no change | Changes the window of a limit, and decides what a request with no client IP does. See the keys under Limits. |
 | `clock` | `Clock` | the system clock | `{ now(): Date }`. Tests inject one. |
-| `cookieName` | string | `"__Host-tempo_session"` | The session cookie. The binding cookie drops a `__Host-` or `__Secure-` prefix, takes `__Secure-`, and adds `_oauth`. With the default name, core moves the old `tempo_session` cookie for one release. |
+| `cookieName` | string | `"__Host-tempo_session"` | The session cookie. The binding cookie drops a `__Host-` or `__Secure-` prefix, takes `__Secure-`, and adds `_oauth`. Core read the old `tempo_session` cookie until 0.2.0, and reads it no more. |
 | `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
 | `magicLink` | object | the defaults below | See the keys under Magic link. |
 | `social` | object | no provider | See the keys under Social. |

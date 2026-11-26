@@ -5,8 +5,7 @@
   "type": "module",
   "description": "The authtempo command line: init, migrate, import, check, and keys rotate.",
   "bin": {
-    "authtempo": "./dist/bin/authtempo.js",
-    "authtempo-import": "./dist/bin/authtempo-import.js"
+    "authtempo": "./dist/bin/authtempo.js"
   },
   "exports": {
     ".": {

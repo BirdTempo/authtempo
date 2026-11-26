@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { base64Url, makePkce, webCrypto } from "../src/pkce.js";
+import { base64Url, makePkce, webCrypto } from "../src/oauth/pkce.js";
 
 describe("pkce", () => {
   it("makes a 43 character verifier and its S256 challenge, fresh each time", async () => {

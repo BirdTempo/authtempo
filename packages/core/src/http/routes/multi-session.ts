@@ -158,7 +158,7 @@ export function multiSessionRoutes(config: ResolvedConfig): Route[] {
         const res = json({ ok: true });
         const { next } = r.value;
         if (next) res.headers.append("set-cookie", activeCookie(ctx.config, next));
-        else await clearSessionCookies(ctx.config, ctx.request, b.token, res);
+        else clearSessionCookies(ctx.config, res);
         return withBag(ctx.config, res, b.raw, r.value.bag);
       },
     },

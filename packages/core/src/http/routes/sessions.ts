@@ -24,42 +24,24 @@ import { sent, unauthorized, withSession } from "../session-route.js";
 
 /**
  * The answer of a request that ended the caller's session: the sign-out, the
- * revoke of the caller's own id, and the account delete (plan 12a). `token` is the session that the request
- * ended. It clears the cookie. The cookie move of plan 12b needs more: with
- * both names, the router keeps the old cookie, and `token` is the new one. So
- * the old token's session ends too, and the old name is cleared. Else the next
- * request signs in again under it. A sibling subdomain can set `tempo_session` too.
+ * revoke of the caller's own id, and the account delete (plan 12a). It
+ * clears the session cookie. Until 0.2.0 it also ended and cleared the old
+ * cookie `tempo_session`. Core reads that name no more, so no request signs
+ * in under it.
  */
-export async function signedOut(
+export function signedOut(
   config: ResolvedConfig,
-  request: Request,
-  token: string | null,
   body: Readonly<Record<string, unknown>> = { ok: true },
-): Promise<Response> {
-  return clearSessionCookies(config, request, token, json(body));
+): Response {
+  return clearSessionCookies(config, json(body));
 }
 
 /**
- * Clears the session cookie on `res`, and with the cookie move of plan 12b
- * ends and clears the old cookie too (see `signedOut`). The end-session
- * route of plan 12e answers a page or a redirect, so it calls this alone.
+ * Clears the session cookie on `res`. The end-session route of plan 12e
+ * answers a page or a redirect, so it calls this alone.
  */
-export async function clearSessionCookies(
-  config: ResolvedConfig,
-  request: Request,
-  token: string | null,
-  res: Response,
-): Promise<Response> {
+export function clearSessionCookies(config: ResolvedConfig, res: Response): Response {
   res.headers.append("set-cookie", clearSessionCookie(config.cookieName, config.cookie.sameSite));
-  const legacy = config.legacyCookieName;
-  const old = legacy === null ? null : readCookie(request, legacy);
-  if (legacy !== null && old !== null) {
-    if (old !== token) {
-      const ended = await destroySession(config, old);
-      if (ended) await deliverLogouts(config, ended.userId);
-    }
-    res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
-  }
   return res;
 }
 
@@ -120,7 +102,7 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
           markRequestUser(ctx.request, ended.userId);
           await deliverLogouts(ctx.config, ended.userId);
         }
-        const res = await signedOut(ctx.config, ctx.request, token);
+        const res = signedOut(ctx.config);
         // Multi-session (plan 12i, owner decision 4): the sign-out ends every
         // session of the browser, so the sessions of the bag end too.
         const ms = ctx.config.multiSession;
@@ -160,7 +142,7 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
         // request carries both names, so `signedOut` does it. `current`
         // tells a bearer client that its token ended (plan 12a Task 13 L1).
         if (r.value.current)
-          return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), {
+          return signedOut(ctx.config, {
             ok: true,
             current: true,
           });
@@ -191,7 +173,7 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
         if (!r.ok) return sent(respond(r), s.renewed);
         // The caller's own session ended: answer as the sign-out does, as
         // `POST /sessions/revoke` does for the caller's own id.
-        return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), {
+        return signedOut(ctx.config, {
           ended: r.value.ended,
         });
       },

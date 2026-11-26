@@ -79,14 +79,6 @@ const SITES: Site[] = [
   },
   {
     file: "http/routes/sessions.ts",
-    fn: "clearSessionCookies",
-    call: "destroySession",
-    count: 1,
-    kind: "sign-out",
-    reason: "the legacy cookie of the cookie move, then deliverLogouts",
-  },
-  {
-    file: "http/routes/sessions.ts",
     fn: "sessionRoutes",
     call: "destroySession",
     count: 1,

@@ -11,7 +11,6 @@ import {
   verifyEmailChange,
 } from "../../engine/email-change.js";
 import { updateProfile } from "../../engine/profile.js";
-import { readSessionToken } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { defaultAccountDeletePage } from "../account-delete-page.js";
 import { isJsonRequest, readBody } from "../body.js";
@@ -148,7 +147,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
           // `account.deleteConfirm` on: a link went out, and the session stays.
           if ("sent" in r.value) return sent(json(r.value), s.renewed);
           // The session is gone: answer as the sign-out does, with no renewed cookie.
-          return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request));
+          return signedOut(ctx.config);
         },
       },
       {
@@ -191,11 +190,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
             : fail("invalid_token");
           if (!r.ok) return sent(jsonCaller ? respond(r) : failed(ctx, r.code), s.renewed);
           // The session is gone: answer as the sign-out does, with no renewed cookie.
-          const out = await signedOut(
-            ctx.config,
-            ctx.request,
-            readSessionToken(ctx.config, ctx.request),
-          );
+          const out = signedOut(ctx.config);
           if (jsonCaller) return out;
           // A form lands on the app, with the same cleared cookies.
           const landed = redirect(`${ctx.config.appURL}/`);

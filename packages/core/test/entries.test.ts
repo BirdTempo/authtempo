@@ -7,7 +7,6 @@ import {
   decodeJws,
   isResourceUrl,
   JWS_RE,
-  LEGACY_COOKIE_NAME,
   readBearer,
   readSessionToken,
   resourceOf,
@@ -141,33 +140,29 @@ describe("the SDK entries of core (plan 11d)", () => {
     });
     expect(readSessionToken({ cookieName: DEFAULT_COOKIE_NAME }, both)).toBe("ts_cookie");
     expect(readSessionToken({ cookieName: "other" }, both)).toBe("ts_bearer");
-    // Plan 12b: the default name is `__Host-tempo_session`, and core reads the old name for one release.
+    // Plan 12b: the default name is `__Host-tempo_session`. Until 0.2.0 core
+    // also read the old name `tempo_session`. Now the old cookie is not read.
     expect(DEFAULT_COOKIE_NAME).toBe("__Host-tempo_session");
-    const legacy = new Request(BASE_URL, {
-      headers: { authorization: "Bearer ts_bearer", cookie: `${LEGACY_COOKIE_NAME}=ts_old` },
+    const old = new Request(BASE_URL, {
+      headers: { authorization: "Bearer ts_bearer", cookie: "tempo_session=ts_old" },
     });
-    const config = { cookieName: DEFAULT_COOKIE_NAME, legacyCookieName: LEGACY_COOKIE_NAME };
-    expect(readSessionToken(config, legacy)).toBe("ts_old");
-    expect(readSessionToken({ cookieName: DEFAULT_COOKIE_NAME }, legacy)).toBe("ts_bearer");
+    expect(readSessionToken({ cookieName: DEFAULT_COOKIE_NAME }, old)).toBe("ts_bearer");
+    // An SDK of 0.1 passed the old name in `legacyCookieName`. The key has no effect now.
+    const stale = { cookieName: DEFAULT_COOKIE_NAME, legacyCookieName: "tempo_session" };
+    expect(readSessionToken(stale, old)).toBe("ts_bearer");
+    const none = new Request(BASE_URL, { headers: { cookie: "tempo_session=ts_old" } });
+    expect(readSessionToken(stale, none)).toBeNull();
   });
 
-  it("names the old cookie for the default name only", () => {
-    const names = { cookieName: DEFAULT_COOKIE_NAME, legacyCookieName: LEGACY_COOKIE_NAME };
+  it("names one session cookie: the setting, or the default", () => {
+    const names = { cookieName: DEFAULT_COOKIE_NAME };
     expect(sessionCookieNames()).toEqual(names);
     expect(sessionCookieNames(undefined)).toEqual(names);
     expect(sessionCookieNames(DEFAULT_COOKIE_NAME)).toEqual(names);
-    expect(sessionCookieNames("app_session")).toEqual({
-      cookieName: "app_session",
-      legacyCookieName: null,
-    });
-    // The config resolves the two names with this one rule.
-    const h = makeAuth();
-    expect([h.config.cookieName, h.config.legacyCookieName]).toEqual([
-      DEFAULT_COOKIE_NAME,
-      LEGACY_COOKIE_NAME,
-    ]);
-    const custom = makeAuth({ cookieName: "app_session" });
-    expect(custom.config.legacyCookieName).toBeNull();
+    expect(sessionCookieNames("app_session")).toEqual({ cookieName: "app_session" });
+    // The config resolves the name with this one rule.
+    expect(makeAuth().config.cookieName).toBe(DEFAULT_COOKIE_NAME);
+    expect(makeAuth({ cookieName: "app_session" }).config.cookieName).toBe("app_session");
   });
 
   it("finds the resource that a URL falls under, the longest path first", () => {

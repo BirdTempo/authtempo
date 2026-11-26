@@ -131,8 +131,10 @@ const sessionRead = () =>
   });
 
 /**
- * A request with the legacy session cookie and `method`. The cookie move
- * reads the store for each method, so a store that is down throws at the boundary.
+ * A request with the old session cookie `tempo_session` and `method`. Until
+ * 0.2.0 the cookie move read the store for each method, so a store that was
+ * down threw at the boundary. Core reads the old cookie no more. So this
+ * request reads no store, and with a method that is no route it answers 404.
  */
 const legacyRead = (method: string) =>
   new Request(`${BASE_URL}/auth/session`, {
@@ -301,29 +303,34 @@ describe("the router line (plan 11g)", () => {
     expect(log.mock.calls).toEqual([["authtempo: passkey registration rejected", "Error"]]);
   });
 
-  it("writes the method of the request, HEAD too", async () => {
+  it("reads no store for a request that holds only the old cookie, so a store that is down writes no line", async () => {
     const log = errors();
-    const res = await createAuth(input({ storage: downStore(new TypeError("db down")) })).handle(
-      legacyRead("HEAD"),
-    );
-    expect(res.status).toBe(500);
-    // The method of today, as 91c26417 wrote it (ruling 12 of plan 12h). HEAD /session is no route.
+    const auth = createAuth(input({ storage: downStore(new TypeError("db down")) }));
+    // HEAD /session is no route. Until 0.2.0 the cookie move read the store here, and this answered 500.
+    expect((await auth.handle(legacyRead("HEAD"))).status).toBe(404);
+    // GET /session finds no session cookie, so it reads no row.
+    expect((await auth.handle(legacyRead("GET"))).status).toBe(401);
+    expect(log).not.toHaveBeenCalled();
+    // The store is down: a request with a session token still throws at the boundary.
+    expect((await auth.handle(sessionRead())).status).toBe(500);
     expect(log.mock.calls).toEqual([
-      ["authtempo: unhandled error", "HEAD", "unmatched", "TypeError"],
+      ["authtempo: unhandled error", "GET", "/session", "TypeError"],
     ]);
   });
 
-  it("scrubs a social client secret from a line", async () => {
+  it("scrubs a social client secret from a line", () => {
     const clientSecret = "GOCSPX-scrub-0123456789abcdef";
     const log = errors();
-    const auth = createAuth(
-      input({
-        storage: downStore(new TypeError("db down")),
-        social: { google: { clientId: "gid", clientSecret } },
-      }),
-    );
-    // A client sends the client secret as its method: the method kind keeps it, and the scrub writes ***.
-    expect((await auth.handle(legacyRead(clientSecret))).status).toBe(500);
+    const config = resolveConfig(input({ social: { google: { clientId: "gid", clientSecret } } }));
+    // A client can send a secret as its method, and the method kind keeps it. Since 0.2.0 no
+    // request with such a method throws in the router. So the fault event comes from here,
+    // and the scrub of the line writes ***.
+    config.observe.emit({
+      name: "error.internal",
+      method: clientSecret,
+      route: "unmatched",
+      errorName: new TypeError("db down"),
+    });
     expect(log.mock.calls).toEqual([
       ["authtempo: unhandled error", "***", "unmatched", "TypeError"],
     ]);
@@ -339,14 +346,11 @@ describe("the router line (plan 11g)", () => {
         observe: { sink },
       }),
     );
-    // The same request as the line above: the method token is the secret.
-    expect((await auth.handle(legacyRead(clientSecret))).status).toBe(500);
+    // A client sends the client secret as its method. No route has that method, so the answer is 404.
+    expect((await auth.handle(legacyRead(clientSecret))).status).toBe(404);
     await auth.observe.flush();
     const written = events();
-    expect(written.map((e) => [e.name, e.method])).toEqual([
-      ["error.internal", "***"],
-      ["request", "***"],
-    ]);
+    expect(written.map((e) => [e.name, e.method])).toEqual([["request", "***"]]);
     expect(JSON.stringify(written)).not.toContain(clientSecret);
   });
 
@@ -524,8 +528,13 @@ describe("the scrub sources (plan 12h)", () => {
 
   it.each(ROWS)("scrubs %s from each event and from the line", async (_source, secret, extra) => {
     const log = errors();
-    const quiet = createAuth(input({ storage: downStore(new TypeError("db down")), ...extra }));
-    expect((await quiet.handle(legacyRead(secret))).status).toBe(500);
+    // The fault event with the secret as its method, as the test of the client secret emits it.
+    resolveConfig(input(extra)).observe.emit({
+      name: "error.internal",
+      method: secret,
+      route: "unmatched",
+      errorName: new TypeError("db down"),
+    });
     expect(log.mock.calls).toEqual([
       ["authtempo: unhandled error", "***", "unmatched", "TypeError"],
     ]);
@@ -533,13 +542,10 @@ describe("the scrub sources (plan 12h)", () => {
     const auth = createAuth(
       input({ storage: downStore(new TypeError("db down")), ...extra, observe: { sink } }),
     );
-    expect((await auth.handle(legacyRead(secret))).status).toBe(500);
+    expect((await auth.handle(legacyRead(secret))).status).toBe(404);
     await auth.observe.flush();
     const written = events();
-    expect(written.map((e) => [e.name, e.method])).toEqual([
-      ["error.internal", "***"],
-      ["request", "***"],
-    ]);
+    expect(written.map((e) => [e.name, e.method])).toEqual([["request", "***"]]);
     expect(JSON.stringify(written)).not.toContain(secret);
   });
 

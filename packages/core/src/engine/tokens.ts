@@ -768,9 +768,8 @@ async function dpopCaller(
 
 /**
  * The cookie first, then the bearer header, as `readSessionToken` reads
- * them: both call `sessionCookieToken`, so the cookie is `cookieName`, then
- * the old `legacyCookieName` for one release (plan 12b). A present cookie
- * wins and the header is not read. A cookie resolves
+ * them: both call `sessionCookieToken`, so the cookie is `cookieName`. A
+ * present cookie wins and the header is not read. A cookie resolves
  * as a session only. A `tk_` value counts only in the bearer header: a
  * browser sends a cookie on a cross-site request, and a script never has
  * one. A JWT bearer is an OAuth access token (plan 9g). `Authorization:

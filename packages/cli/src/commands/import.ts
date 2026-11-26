@@ -52,7 +52,11 @@ const OPTIONS = {
   report: { type: "string" },
 } as const;
 
-/** The old flags of the alias, each with its new form (spec 19, the flag map). */
+/**
+ * The flags of the old binary `authtempo-import`, each with its new form
+ * (spec 19, the flag map). Release 0.2.0 removed the binary. A person who
+ * upgrades a script gets the new form in the usage error.
+ */
 const RENAMED: Readonly<Record<string, string>> = {
   "--postgres":
     "use --target postgres with --url-env <NAME> or --url-file <path>, so the connection string stays out of the command line",
@@ -71,8 +75,8 @@ const NEW_NAMES: Readonly<Record<string, string>> = {
 /**
  * `authtempo import <provider>` (spec 19): the import CLI under the new name,
  * with the target and the table set as closed flags, and every secret read
- * by the no-secret rule. It maps its flags onto the old names and calls the
- * same checks and the same run as the alias.
+ * by the no-secret rule. It maps its flags onto the names of `ImportValues`
+ * and calls the checks and the run of import-core.ts.
  */
 export const importCommand: Command = {
   help: IMPORT_HELP,

@@ -1,4 +1,4 @@
-import { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE, readCookie } from "../http/cookies.js";
+import { DEFAULT_SESSION_COOKIE, readCookie } from "../http/cookies.js";
 
 /**
  * The facts of each credential that core issues (plan 11d, spec 20). The
@@ -99,33 +99,19 @@ export const ACCESS_TOKEN_TYPE = "at+jwt";
  */
 export const DEFAULT_COOKIE_NAME = DEFAULT_SESSION_COOKIE;
 
-/**
- * The session cookie name before plan 12b. Core reads it for one release when
- * `cookieName` is the default. An SDK passes it as `legacyCookieName` to
- * `readSessionToken` for that release (row 12j removes the read).
- */
-export const LEGACY_COOKIE_NAME = LEGACY_SESSION_COOKIE;
-
-/** The cookie names that `readSessionToken` reads: `legacyCookieName` only for the plan 12b move. */
+/** The cookie name that `readSessionToken` reads. Until 0.2.0 it also held the old name `tempo_session`. */
 export interface SessionCookieNames {
   cookieName: string;
-  legacyCookieName?: string | null;
 }
 
 /**
- * The session cookie names of a `cookieName` setting: the old name is read
- * only when the name is the default (plan 12b). The one copy of this rule:
- * the config and every SDK call it (plan 11d).
+ * The session cookie name of a `cookieName` setting: the setting, or the
+ * default. The one copy of this rule: the config and every SDK call it
+ * (plan 11d). Until 0.2.0 it also answered the old name `tempo_session`
+ * for the default, and core read that cookie too.
  */
-export function sessionCookieNames(cookieName?: string): {
-  cookieName: string;
-  legacyCookieName: string | null;
-} {
-  const name = cookieName ?? DEFAULT_COOKIE_NAME;
-  return {
-    cookieName: name,
-    legacyCookieName: name === DEFAULT_COOKIE_NAME ? LEGACY_COOKIE_NAME : null,
-  };
+export function sessionCookieNames(cookieName?: string): { cookieName: string } {
+  return { cookieName: cookieName ?? DEFAULT_COOKIE_NAME };
 }
 
 /** The value of `Authorization: Bearer <value>`, or null. The one copy of the bearer rule. */
@@ -157,9 +143,7 @@ export function readDpopToken(request: Pick<Request, "headers">): string | null 
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
  * Public from `@authtempo/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
  * the session token with this function, so the cookie and bearer rule has one copy. It reads
- * only `cookieName`, `legacyCookieName`, and the headers, so the shim passes
- * `{ cookieName, legacyCookieName }` and `{ headers }`. Since plan 12b it also reads the old cookie name when the config names
- * one (`legacyCookieName`), for one release.
+ * only `cookieName` and the headers, so the shim passes `{ cookieName }` and `{ headers }`.
  */
 export function readSessionToken(
   config: SessionCookieNames,
@@ -169,16 +153,12 @@ export function readSessionToken(
 }
 
 /**
- * The session token of the cookie: `cookieName`, then `legacyCookieName` for
- * one release (plan 12b), or null. The one copy of the cookie read:
- * `readSessionToken` and `callerFromRequest` both call it.
+ * The session token of the cookie `cookieName`, or null. The one copy of the
+ * cookie read: `readSessionToken` and `callerFromRequest` both call it.
  */
 export function sessionCookieToken(
   config: SessionCookieNames,
   request: Pick<Request, "headers">,
 ): string | null {
-  const cookie = readCookie(request, config.cookieName);
-  if (cookie) return cookie;
-  const legacy = config.legacyCookieName ? readCookie(request, config.legacyCookieName) : null;
-  return legacy || null;
+  return readCookie(request, config.cookieName) || null;
 }

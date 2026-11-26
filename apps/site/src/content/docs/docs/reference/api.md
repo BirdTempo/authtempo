@@ -137,7 +137,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `LIMITS_FROM_SETTINGS` | The six limit families whose window comes from another setting, each with that setting. `limits.windows` refuses them. |
 | `LIMIT_OVERRIDE_CALLS_MAX` | 100000, the highest `max` of a window of `limits.windows`. |
 | `LIMIT_OVERRIDE_SECONDS_MAX` | 86400, the highest `seconds` of a window of `limits.windows`. |
-| `LEGACY_SESSION_COOKIE` | `tempo_session`, the old session cookie. For one release core reads it and moves it. |
+| `LEGACY_SESSION_COOKIE` | `tempo_session`, the old session cookie. Core reads it no more since 0.2.0. The name stays reserved for no other cookie of core. |
 | `LEGACY_VERIFY_HASH` | The hash value of a user whose password the old system checks. |
 | `PBKDF2_ITERATIONS` | 100000. |
 | `PASSKEY_HINTS` | `security-key`, `client-device`, and `hybrid`: the hints of WebAuthn Level 3. |
@@ -236,8 +236,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `movedPrefixFault` | The rule of a `tokens.movedPrefixes` entry: `"form"`, `"shadow"` (it overlaps a core prefix), or null. Core's config and `@authtempo/verify` read it. |
 | `SESSION_JWT_TYPE`, `ACCESS_TOKEN_TYPE` | `JWT` and `at+jwt`, the header `typ` of a session JWT and of an OAuth access token. |
 | `DEFAULT_COOKIE_NAME` | `__Host-tempo_session`, the session cookie name when the config sets no `cookieName`. |
-| `LEGACY_COOKIE_NAME` | The session cookie name before plan 12b. Core reads it for one release when `cookieName` is the default. |
-| `sessionCookieNames`, `SessionCookieNames` | The cookie names of a `cookieName` setting, and their type. The old name is read only with the default name. |
+| `sessionCookieNames`, `SessionCookieNames` | The session cookie name of a `cookieName` setting, and its type: `{ cookieName }`. |
 | `readSessionToken` | The session token of a request: the cookie, then the bearer header. |
 | `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
 | `readDpopToken` | The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1). |
