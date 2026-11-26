@@ -36,7 +36,8 @@ describe("the calls that can answer session_not_fresh", () => {
     // sso.connections, and scim.tokens: each of their calls needs a fresh session.
     // Plan 12i Task 2 adds username.set, and Task 5 phone.add, phone.verifyAdd,
     // and phone.remove.
-    expect(listed).toHaveLength(30);
+    // POST /sessions/revoke-all adds sessions.revokeAll.
+    expect(listed).toHaveLength(31);
     expect(named).toEqual(listed);
   });
 });

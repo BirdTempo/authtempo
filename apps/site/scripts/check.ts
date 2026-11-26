@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
-import { PROVIDERS } from "@authtempo/cli/program";
+import { COMMANDS, PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, GUIDES, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { STORAGE_ERROR_CODES } from "@authtempo/core/errors";
@@ -499,11 +499,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         today: new Date(),
       }),
   },
-  // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route or a
-  // config key. It fails while ROUTES or the config keys hold that fact.
+  // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route, a
+  // config key, a command, or a file. It fails while the code holds that fact.
   {
     name: "check-compare",
-    run: () => checkCompare({ rows: COMPARE_ROWS, routes: ROUTES, keys: configKeyPaths() }),
+    run: () =>
+      checkCompare({
+        rows: COMPARE_ROWS,
+        routes: ROUTES,
+        keys: configKeyPaths(),
+        commands: Object.keys(COMMANDS),
+        tracked: trackedFiles(REPO),
+      }),
   },
   // Plan 11b Task 7: the feed of dist is valid Atom, with one entry per version
   // heading and one row of RELEASE_DATES each. The root comes from repo.ts (ruling 24).

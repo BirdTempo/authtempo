@@ -226,6 +226,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 | `client.sessions.list()` | `GET /sessions` | `SessionSummaryJSON[]`, newest first. `current` marks the caller's session. `impersonation` marks a session that a platform operator opened, and names no operator |
 | `client.sessions.revoke({ id })` | `POST /sessions/revoke` | `{ ok: true, current }`. See the rule below the table |
 | `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `{ ended }`, the count of ended sessions |
+| `client.sessions.revokeAll()` | `POST /sessions/revoke-all` | `{ ended }`, the count of ended sessions, with the caller's own. The caller is then signed out |
 | `client.reauth.password({ password, code? })` | `POST /reauth` | `FreshJSON`. `code` is the second factor, while it is on |
 | `client.reauth.requestEmailCode()` | `POST /reauth/email` | `{ sent: true }`. The code goes to the account's address |
 | `client.reauth.emailCode({ emailCode, code? })` | `POST /reauth` | `FreshJSON` |
@@ -248,7 +249,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 
 **A fresh session.** Some changes need a fresh session: a sign-in or a re-authentication that is younger than `session.freshMinutes`. A stale session gets `session_not_fresh` (403), and nothing changes. These calls can answer it:
 
-- `sessions.revoke`, `sessions.revokeOthers`
+- `sessions.revoke`, `sessions.revokeOthers`, `sessions.revokeAll`
 - `user.changeEmail`, `user.delete`
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`

@@ -459,6 +459,7 @@ Each one needs a session, except `user.confirmEmailChange`.
 | `client.sessions.list()` | `GET /sessions` | `ClientResult<SessionSummaryJSON[]>`, newest first. `current` marks the caller's session. `impersonation` marks a session that a platform operator opened, and names no operator |
 | `client.sessions.revoke({ id })` | `POST /sessions/revoke` | `ClientResult<{ ok: true, current }>`. See the rule below the table |
 | `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `ClientResult<{ ended }>`, the count of ended sessions |
+| `client.sessions.revokeAll()` | `POST /sessions/revoke-all` | `ClientResult<{ ended }>`, the count of ended sessions, with the caller's own. The caller is then signed out |
 | `client.reauth.password({ password, code? })` | `POST /reauth` | `ClientResult<FreshJSON>`. `code` is the second factor, while it is on |
 | `client.reauth.requestEmailCode()` | `POST /reauth/email` | `ClientResult<{ sent: true }>`. The code goes to the account's address |
 | `client.reauth.emailCode({ emailCode, code? })` | `POST /reauth` | `ClientResult<FreshJSON>` |
@@ -486,7 +487,7 @@ re-authentication that is younger than `session.freshMinutes`. A stale
 session gets `session_not_fresh` (403), and nothing changes. These calls
 can answer it:
 
-- `sessions.revoke`, `sessions.revokeOthers`
+- `sessions.revoke`, `sessions.revokeOthers`, `sessions.revokeAll`
 - `user.changeEmail`, `user.delete`
 - `username.set`
 - `phone.add`, `phone.verifyAdd`, `phone.remove`

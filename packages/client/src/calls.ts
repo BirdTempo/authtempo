@@ -301,6 +301,7 @@ export const CLIENT_CALLS = [
   { operation: "sessions.list", method: "GET", path: "/sessions", select: "sessions" },
   { operation: "sessions.revoke", method: "POST", path: "/sessions/revoke" },
   { operation: "sessions.revokeOthers", method: "POST", path: "/sessions/revoke-others" },
+  { operation: "sessions.revokeAll", method: "POST", path: "/sessions/revoke-all" },
   { operation: "reauth", method: "POST", path: "/reauth" },
   { operation: "reauth.email.request", method: "POST", path: "/reauth/email" },
   { operation: "reauth.passkey.options", method: "POST", path: "/reauth/passkey/options" },

@@ -211,6 +211,14 @@ export const ROUTES = Object.freeze([
   },
   {
     method: "POST",
+    path: "/sessions/revoke-all",
+    feature: "account",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "session_not_fresh"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
     path: "/user/update",
     feature: "account",
     auth: ["session"],
